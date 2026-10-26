@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 Jonaki for Linux - Main Entry Point & Command Line Switch Parser
 Full CLI compatibility and PotPlayer-style switches.

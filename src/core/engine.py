@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 Jonaki for Linux - Core Playback Engine Controller (In-Process libmpv Backend)
 Integrates packed libmpv directly in-process via C-FFI, delivering authentic PotPlayer performance:

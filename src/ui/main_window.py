@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """
 Jonaki for Linux - Main Player Window & Input Coordinator
 Integrates MPV rendering surface, DSF skin overlay, keyboard shortcuts, and dialogs.
@@ -1328,6 +1329,7 @@ class JonakiMainWindow(Gtk.Window):
         about.set_version("1.0.0 (Linux Native)")
         about.set_copyright("Jonaki Open Source Project")
         about.set_comments("Modern high-performance media player for Linux, inspired by PotPlayer.\nNative in-process libmpv hardware playback with zero external dependencies.")
+        about.set_license_type(Gtk.License.GPL_3_0)
         about.set_website("https://github.com/jonaki-player/jonaki")
         about.run()
         about.destroy()
