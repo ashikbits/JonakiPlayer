@@ -1,0 +1,18 @@
+//!HOOK MAIN
+//!BIND HOOKED
+//!DESC PotPlayer Adaptive Sharpen Shader
+
+vec4 hook() {
+    vec2 pt = HOOKED_pt;
+    vec4 c = HOOKED_tex(HOOKED_pos);
+    vec4 cN = HOOKED_tex(HOOKED_pos + vec2(0.0, -pt.y));
+    vec4 cS = HOOKED_tex(HOOKED_pos + vec2(0.0,  pt.y));
+    vec4 cW = HOOKED_tex(HOOKED_pos + vec2(-pt.x, 0.0));
+    vec4 cE = HOOKED_tex(HOOKED_pos + vec2( pt.x, 0.0));
+
+    vec4 laplacian = 4.0 * c - (cN + cS + cW + cE);
+    float edge = length(laplacian.rgb);
+    float weight = clamp(1.0 - edge * 2.0, 0.2, 1.0);
+
+    return c + 0.6 * weight * laplacian;
+}

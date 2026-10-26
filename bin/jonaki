@@ -1,0 +1,23 @@
+#!/bin/bash
+# Jonaki for Linux - Executable Launcher
+# Native packed libmpv multimedia engine supporting pure Wayland and X11 out of the box.
+
+REAL_SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$REAL_SOURCE")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+export PYTHONPATH="$PROJECT_DIR/src:$HOME/.local/lib/python3.13/site-packages:$PYTHONPATH"
+export LD_LIBRARY_PATH="$PROJECT_DIR/lib:$LD_LIBRARY_PATH"
+export GST_PLUGIN_PATH="$PROJECT_DIR/lib/gstreamer-1.0:$HOME/.local/lib/gstreamer-1.0:$GST_PLUGIN_PATH"
+export GDK_BACKEND=x11
+unset WAYLAND_DISPLAY
+
+if [ -z "$VDPAU_DRIVER" ]; then
+    if [ -f "/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_radeonsi.so" ]; then
+        export VDPAU_DRIVER=radeonsi
+    elif [ -f "/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_va_gl.so" ]; then
+        export VDPAU_DRIVER=va_gl
+    fi
+fi
+
+exec python3 "$PROJECT_DIR/src/jonaki.py" "$@"

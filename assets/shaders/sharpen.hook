@@ -1,0 +1,23 @@
+//!HOOK MAIN
+//!BIND HOOKED
+//!DESC PotPlayer 3x3 Sharpen Shader
+
+vec4 hook() {
+    vec2 pt = HOOKED_pt;
+    float effect_width = 1.6;
+    float val0 = 2.0;
+    float val1 = -0.125;
+    vec2 d = effect_width * pt;
+
+    vec4 c1 = HOOKED_tex(HOOKED_pos + vec2(-d.x, -d.y)) * val1;
+    vec4 c2 = HOOKED_tex(HOOKED_pos + vec2(0.0,  -d.y)) * val1;
+    vec4 c3 = HOOKED_tex(HOOKED_pos + vec2(-d.x,  0.0)) * val1;
+    vec4 c4 = HOOKED_tex(HOOKED_pos + vec2( d.x,  0.0)) * val1;
+    vec4 c5 = HOOKED_tex(HOOKED_pos + vec2(0.0,   d.y)) * val1;
+    vec4 c6 = HOOKED_tex(HOOKED_pos + vec2( d.x,  d.y)) * val1;
+    vec4 c7 = HOOKED_tex(HOOKED_pos + vec2(-d.x,  d.y)) * val1;
+    vec4 c8 = HOOKED_tex(HOOKED_pos + vec2( d.x, -d.y)) * val1;
+    vec4 c9 = HOOKED_tex(HOOKED_pos) * val0;
+
+    return c1 + c2 + c3 + c4 + c5 + c6 + c7 + c8 + c9;
+}

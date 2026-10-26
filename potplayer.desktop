@@ -1,0 +1,13 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Name=Jonaki (PotPlayer)
+GenericName=Multimedia Player
+Comment=High-performance media player for Linux, inspired by PotPlayer
+Exec=jonaki %U
+Icon=/home/ashik/Data/Projects/PotPlayer/assets/logos/jonaki.png
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;Recorder;
+MimeType=video/mp4;video/x-matroska;video/avi;video/webm;video/quicktime;audio/mpeg;audio/flac;audio/ogg;
+Keywords=video;audio;player;subtitles;jonaki;potplayer;
+StartupNotify=true

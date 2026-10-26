@@ -1,0 +1,54 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+!lib/*.so*
+!lib/*
+!src/gi/*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Temporary runtime files & sockets
+*.sock
+*.pid
+*.log
+*.tmp
+*.bak
+
+# SQLite & local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Proprietary binaries & raw installer extractions
+PotPlayerSetup64.exe
+extracted_potplayer/
+
+# Transient test captures & screenshots
+/*.png
+!assets/
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
