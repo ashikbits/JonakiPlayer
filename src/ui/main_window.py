@@ -60,6 +60,8 @@ class JonakiMainWindow(Gtk.Window):
         self.current_index: int = -1
         self.is_fullscreen: bool = False
         self._last_mouse_move_time = time.time()
+        self._last_mouse_pos = (-1, -1)
+        self._cursor_visible: bool = True
         self._controls_visible = True
         self._pending_playback: Optional[Any] = None
 
@@ -88,6 +90,20 @@ class JonakiMainWindow(Gtk.Window):
         self.video_area = Gtk.DrawingArea()
         self.video_area.set_can_focus(True)
         self.video_area.connect("realize", self._on_video_realize)
+
+        video_events = (Gdk.EventMask.BUTTON_PRESS_MASK |
+                        Gdk.EventMask.BUTTON_RELEASE_MASK |
+                        Gdk.EventMask.POINTER_MOTION_MASK |
+                        Gdk.EventMask.POINTER_MOTION_HINT_MASK |
+                        Gdk.EventMask.SCROLL_MASK |
+                        Gdk.EventMask.ENTER_NOTIFY_MASK |
+                        Gdk.EventMask.LEAVE_NOTIFY_MASK |
+                        Gdk.EventMask.KEY_PRESS_MASK)
+        self.video_area.add_events(video_events)
+        self.video_area.connect("button-press-event", self._on_video_button_press)
+        self.video_area.connect("scroll-event", self._on_video_scroll)
+        self.video_area.connect("motion-notify-event", self._on_mouse_motion)
+        self.video_area.connect("enter-notify-event", self._on_mouse_motion)
         self.video_overlay.add(self.video_area)
 
         # Cairo overlay layer for logo and OSD text / Tab Tech HUD
@@ -99,14 +115,11 @@ class JonakiMainWindow(Gtk.Window):
         self.video_overlay.add_overlay(self.osd_layer)
         self.video_overlay.set_overlay_pass_through(self.osd_layer, True)
 
-        self.video_overlay.add_events(Gdk.EventMask.BUTTON_PRESS_MASK |
-                                      Gdk.EventMask.BUTTON_RELEASE_MASK |
-                                      Gdk.EventMask.POINTER_MOTION_MASK |
-                                      Gdk.EventMask.SCROLL_MASK |
-                                      Gdk.EventMask.KEY_PRESS_MASK)
+        self.video_overlay.add_events(video_events)
         self.video_overlay.connect("button-press-event", self._on_video_button_press)
         self.video_overlay.connect("scroll-event", self._on_video_scroll)
         self.video_overlay.connect("motion-notify-event", self._on_mouse_motion)
+        self.video_overlay.connect("enter-notify-event", self._on_mouse_motion)
         self.main_box.pack_start(self.video_overlay, True, True, 0)
 
         # Bottom Skin Control Bar Area (62px: 22px upper slider strip + 40px lower button strip)
@@ -115,10 +128,13 @@ class JonakiMainWindow(Gtk.Window):
         self.skin_area.connect("draw", self._on_draw_skin_area)
         self.skin_area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK |
                                  Gdk.EventMask.BUTTON_RELEASE_MASK |
-                                 Gdk.EventMask.POINTER_MOTION_MASK)
+                                 Gdk.EventMask.POINTER_MOTION_MASK |
+                                 Gdk.EventMask.POINTER_MOTION_HINT_MASK |
+                                 Gdk.EventMask.ENTER_NOTIFY_MASK)
         self.skin_area.connect("button-press-event", self._on_skin_button_press)
         self.skin_area.connect("button-release-event", self._on_skin_button_release)
         self.skin_area.connect("motion-notify-event", self._on_skin_motion)
+        self.skin_area.connect("enter-notify-event", self._on_mouse_motion)
         self.main_box.pack_end(self.skin_area, False, False, 0)
 
         # Right-click context menu
@@ -129,7 +145,12 @@ class JonakiMainWindow(Gtk.Window):
         self.playlist_window = PlaylistWindow(self)
         self.media_info_dialog = MediaInfoDialog(self)
 
-        # Window events
+        # Window events (also listen on toplevel so any mouse activity unhides cursor)
+        self.add_events(Gdk.EventMask.POINTER_MOTION_MASK |
+                        Gdk.EventMask.POINTER_MOTION_HINT_MASK |
+                        Gdk.EventMask.ENTER_NOTIFY_MASK)
+        self.connect("motion-notify-event", self._on_mouse_motion)
+        self.connect("enter-notify-event", self._on_mouse_motion)
         self.connect("key-press-event", self._on_key_press)
         self.connect("destroy", self._on_destroy)
 
@@ -241,16 +262,23 @@ class JonakiMainWindow(Gtk.Window):
             if self.osd_layer.get_visible():
                 self.osd_layer.hide()
 
-        # Check auto-hide controls during fullscreen playback
-        if self.is_fullscreen and self.core.state == PlaybackState.PLAYING:
+        # Auto-hide controls in fullscreen & cursor during active playback
+        if self.core.state == PlaybackState.PLAYING:
             if time.time() - self._last_mouse_move_time > 2.5:
-                if self._controls_visible:
+                # In fullscreen, auto-hide the bottom skin control bar
+                if self.is_fullscreen and self._controls_visible:
                     self.skin_area.hide()
                     self._controls_visible = False
-                    # Hide cursor
-                    gdk_win = self.get_window()
-                    if gdk_win:
-                        gdk_win.set_cursor(Gdk.Cursor.new_for_display(Gdk.Display.get_default(), Gdk.CursorType.BLANK_CURSOR))
+                # Auto-hide cursor over video after 2.5 seconds of inactivity
+                if self._cursor_visible:
+                    self._set_cursor_visible(False)
+        else:
+            # When paused, stopped, or idle: cursor & controls should always be visible
+            if not self._cursor_visible:
+                self._set_cursor_visible(True)
+            if not self._controls_visible:
+                self.skin_area.show()
+                self._controls_visible = True
         return True
 
     # --- Draw Handlers ---
@@ -271,7 +299,7 @@ class JonakiMainWindow(Gtk.Window):
             cr.rectangle(0, 0, w, h)
             cr.fill()
 
-            logo_surf = self.skin.surfaces.get("Jonaki.png") or self.skin.surfaces.get("PotPlayer.png") or self.skin.surfaces.get("Main.png")
+            logo_surf = self.skin.surfaces.get("jonaki.png") or self.skin.surfaces.get("Jonaki.png") or self.skin.surfaces.get("PotPlayer.png") or self.skin.surfaces.get("Main.png")
             cr.select_font_face("Segoe UI", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
             cr.set_font_size(24.0)
             cr.set_source_rgb(0.4, 0.4, 0.45)
@@ -315,16 +343,49 @@ class JonakiMainWindow(Gtk.Window):
 
     # --- Mouse & Interaction Handlers ---
 
+    def _set_cursor_visible(self, visible: bool):
+        self._cursor_visible = visible
+        cursor = None if visible else Gdk.Cursor.new_for_display(Gdk.Display.get_default(), Gdk.CursorType.BLANK_CURSOR)
+
+        # Apply to toplevel window
+        top_win = self.get_window()
+        if top_win:
+            top_win.set_cursor(cursor)
+
+        # Apply directly to video area window so child X11/Wayland surface reflects state immediately
+        if hasattr(self, "video_area") and self.video_area:
+            vid_win = self.video_area.get_window()
+            if vid_win:
+                vid_win.set_cursor(cursor)
+
+        # Apply to OSD overlay layer
+        if hasattr(self, "osd_layer") and self.osd_layer:
+            osd_win = self.osd_layer.get_window()
+            if osd_win:
+                osd_win.set_cursor(cursor)
+
     def _on_mouse_motion(self, widget, event):
+        cur_pos = (int(getattr(event, "x_root", getattr(event, "x", 0))),
+                   int(getattr(event, "y_root", getattr(event, "y", 0))))
+        if cur_pos == self._last_mouse_pos and self._cursor_visible and self._controls_visible:
+            return False
+
+        self._last_mouse_pos = cur_pos
         self._last_mouse_move_time = time.time()
+
+        # Unhide cursor immediately upon any mouse movement
+        if not self._cursor_visible:
+            self._set_cursor_visible(True)
+
+        # Unhide controls if they were auto-hidden in fullscreen
         if not self._controls_visible:
             self.skin_area.show()
             self._controls_visible = True
-            gdk_win = self.get_window()
-            if gdk_win:
-                gdk_win.set_cursor(None)
+
+        return False
 
     def _on_video_button_press(self, widget, event):
+        self._on_mouse_motion(widget, event)
         self.video_area.grab_focus()
         if event.button == 1:
             if event.type == Gdk.EventType._2BUTTON_PRESS:
@@ -343,6 +404,7 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
 
     def _on_skin_button_press(self, widget, event):
+        self._on_mouse_motion(widget, event)
         hit = self.skin.hit_test(int(event.x), int(event.y))
         if hit:
             if hit == self.skin.timebar:
@@ -374,6 +436,7 @@ class JonakiMainWindow(Gtk.Window):
         self.skin_area.queue_draw()
 
     def _on_skin_motion(self, widget, event):
+        self._on_mouse_motion(widget, event)
         x, y = int(event.x), int(event.y)
         if self.skin.timebar and self.skin.timebar.is_dragging:
             tx, ty, tw, th = self.skin.timebar.rect
@@ -1044,9 +1107,12 @@ class JonakiMainWindow(Gtk.Window):
             self.is_fullscreen = False
             self.skin_area.show()
             self._controls_visible = True
+            self._set_cursor_visible(True)
         else:
             self.fullscreen()
             self.is_fullscreen = True
+            self._last_mouse_move_time = time.time()
+            self._set_cursor_visible(True)
 
     # --- Core Event Callbacks ---
 

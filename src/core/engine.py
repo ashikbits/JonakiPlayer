@@ -193,6 +193,8 @@ class JonakiCore:
         self.lib.mpv_set_option_string(self.handle, b"keep-open", b"yes")
         self.lib.mpv_set_option_string(self.handle, b"input-default-bindings", b"no")
         self.lib.mpv_set_option_string(self.handle, b"input-vo-keyboard", b"no")
+        self.lib.mpv_set_option_string(self.handle, b"cursor-autohide", b"no")
+        self.lib.mpv_set_option_string(self.handle, b"input-cursor", b"no")
         self.lib.mpv_set_option_string(self.handle, b"sub-auto", b"fuzzy")
         self.lib.mpv_set_option_string(self.handle, b"audio-client-name", b"Jonaki")
 
@@ -236,6 +238,8 @@ class JonakiCore:
             self.set_property("gpu-context", "x11egl")
             self.set_property("wid", str(wid))
             self.set_property("vo", "gpu")
+            self.set_property("cursor-autohide", "no")
+            self.set_property("input-cursor", "no")
             if getattr(self, "_pending_file", None):
                 pending = self._pending_file
                 self._pending_file = None
