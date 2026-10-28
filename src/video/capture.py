@@ -14,11 +14,11 @@ class MediaCaptureManager:
         if capture_dir is None:
             pictures_dir = os.path.expanduser("~/Pictures")
             capture_dir = os.path.join(pictures_dir, "Jonaki")
-            os.makedirs(capture_dir, exist_ok=True)
         self.capture_dir = capture_dir
+        os.makedirs(self.capture_dir, exist_ok=True)
 
     def generate_capture_filename(self, prefix: str = "Jonaki", ext: str = "png") -> str:
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        timestamp = time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time() * 1000) % 1000:03d}"
         return os.path.join(self.capture_dir, f"{prefix}_{timestamp}.{ext}")
 
     def create_animated_gif(self, input_file: str, start_sec: float, duration_sec: float = 5.0,
@@ -60,8 +60,9 @@ class MediaCaptureManager:
             duration_sec = 60.0
 
         interval = duration_sec / (total_frames + 1)
+        fps_val = 1.0 / interval
         # Select frames evenly spaced across duration
-        filter_str = f"fps=1/{interval},scale=320:-1,drawtext=text='%{{pts\\:hms}}':x=10:y=h-th-10:fontcolor=white:box=1:boxcolor=black@0.6,tile={columns}x{rows}"
+        filter_str = f"fps={fps_val:.6f},scale=320:-1,drawtext=text='%{{pts\\:hms}}':x=10:y=h-th-10:fontcolor=white:box=1:boxcolor=black@0.6,tile={columns}x{rows}"
 
         cmd = [
             "ffmpeg", "-y",
@@ -85,17 +86,20 @@ class MediaCaptureManager:
         if not os.path.exists(image_path):
             return False
 
+        import mimetypes
+        mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
+
         # Try wl-copy (Wayland)
         try:
             with open(image_path, "rb") as f:
-                subprocess.run(["wl-copy", "--type", "image/png"], stdin=f, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                subprocess.run(["wl-copy", "--type", mime_type], stdin=f, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
                 return True
         except (subprocess.SubprocessError, FileNotFoundError):
             pass
 
         # Try xclip (X11)
         try:
-            subprocess.run(["xclip", "-selection", "clipboard", "-t", "image/png", "-i", image_path],
+            subprocess.run(["xclip", "-selection", "clipboard", "-t", mime_type, "-i", image_path],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             return True
         except (subprocess.SubprocessError, FileNotFoundError):

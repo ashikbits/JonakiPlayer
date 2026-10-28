@@ -7,6 +7,8 @@ Integrates MPV rendering surface, DSF skin overlay, keyboard shortcuts, and dial
 import os
 import sys
 import time
+import random
+import threading
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
@@ -33,7 +35,7 @@ from subtitle.translator import SubtitleTranslator
 
 
 class JonakiMainWindow(Gtk.Window):
-    def __init__(self, initial_files: Optional[List[str]] = None, config_preset: str = "Default"):
+    def __init__(self, initial_files: Optional[List[str]] = None, config_preset: str = "Default", db: Optional[MediaDatabase] = None):
         super().__init__(title="Jonaki")
         self.set_default_size(960, 580)
         self.set_position(Gtk.WindowPosition.CENTER)
@@ -45,9 +47,19 @@ class JonakiMainWindow(Gtk.Window):
             self.set_visual(rgba)
 
         # Subsystems
-        self.db = MediaDatabase()
+        self.db = db if db is not None else MediaDatabase()
         self.equalizer = EqualizerModel()
         self.dsp = AudioDSPChain()
+        # PotPlayer-style Audio Enhancement preferences (enabled by default on fresh installation)
+        enh_enabled_saved = self.db.get_setting("audio_enhancement_enabled", "1")
+        enh_preset_saved = self.db.get_setting("audio_enhancement_preset", "Balanced / Default")
+        enh_gain_saved = self.db.get_setting("audio_enhancement_gain", "5.0")
+        try:
+            self.dsp.enhancement_gain_db = float(enh_gain_saved)
+        except (ValueError, TypeError):
+            self.dsp.enhancement_gain_db = 5.0
+        self.dsp.set_enhancement_preset(enh_preset_saved)
+        self.dsp.enhancement_enabled = (enh_enabled_saved == "1")
         self.shader_mgr = VideoShaderManager()
         self.capture_mgr = MediaCaptureManager()
         self.sub_mgr = SubtitleManager()
@@ -64,6 +76,9 @@ class JonakiMainWindow(Gtk.Window):
         self._cursor_visible: bool = True
         self._controls_visible = True
         self._pending_playback: Optional[Any] = None
+        self._is_keep_above: bool = False
+        self._click_timer_id: Optional[int] = None
+        self._translation_seq: int = 0
 
         # Root vertical layout box
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -75,11 +90,11 @@ class JonakiMainWindow(Gtk.Window):
         self.core.on_state_change = self._on_core_state_change
         self.core.on_file_end = self._on_core_file_end
 
-        # Route OSD messages to native GPU engine during active playback
+        # Route OSD messages to native GPU engine during active playback or paused file
         orig_show_osd = self.osd.show_osd
         def _show_osd_wrapper(text: str, duration_sec: float = 2.0):
             orig_show_osd(text, duration_sec)
-            if self.core.state == PlaybackState.PLAYING:
+            if self.core.state in (PlaybackState.PLAYING, PlaybackState.PAUSED) and self.core.current_file:
                 clean = text.replace('"', '\\"')
                 self.core.command(f'show-text "{clean}" {int(duration_sec * 1000)}')
         self.osd.show_osd = _show_osd_wrapper
@@ -94,7 +109,6 @@ class JonakiMainWindow(Gtk.Window):
         video_events = (Gdk.EventMask.BUTTON_PRESS_MASK |
                         Gdk.EventMask.BUTTON_RELEASE_MASK |
                         Gdk.EventMask.POINTER_MOTION_MASK |
-                        Gdk.EventMask.POINTER_MOTION_HINT_MASK |
                         Gdk.EventMask.SCROLL_MASK |
                         Gdk.EventMask.ENTER_NOTIFY_MASK |
                         Gdk.EventMask.LEAVE_NOTIFY_MASK |
@@ -114,12 +128,6 @@ class JonakiMainWindow(Gtk.Window):
         self.osd_layer.connect("draw", self._on_draw_video_area)
         self.video_overlay.add_overlay(self.osd_layer)
         self.video_overlay.set_overlay_pass_through(self.osd_layer, True)
-
-        self.video_overlay.add_events(video_events)
-        self.video_overlay.connect("button-press-event", self._on_video_button_press)
-        self.video_overlay.connect("scroll-event", self._on_video_scroll)
-        self.video_overlay.connect("motion-notify-event", self._on_mouse_motion)
-        self.video_overlay.connect("enter-notify-event", self._on_mouse_motion)
         self.main_box.pack_start(self.video_overlay, True, True, 0)
 
         # Bottom Skin Control Bar Area (62px: 22px upper slider strip + 40px lower button strip)
@@ -129,7 +137,6 @@ class JonakiMainWindow(Gtk.Window):
         self.skin_area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK |
                                  Gdk.EventMask.BUTTON_RELEASE_MASK |
                                  Gdk.EventMask.POINTER_MOTION_MASK |
-                                 Gdk.EventMask.POINTER_MOTION_HINT_MASK |
                                  Gdk.EventMask.ENTER_NOTIFY_MASK)
         self.skin_area.connect("button-press-event", self._on_skin_button_press)
         self.skin_area.connect("button-release-event", self._on_skin_button_release)
@@ -147,10 +154,10 @@ class JonakiMainWindow(Gtk.Window):
 
         # Window events (also listen on toplevel so any mouse activity unhides cursor)
         self.add_events(Gdk.EventMask.POINTER_MOTION_MASK |
-                        Gdk.EventMask.POINTER_MOTION_HINT_MASK |
                         Gdk.EventMask.ENTER_NOTIFY_MASK)
         self.connect("motion-notify-event", self._on_mouse_motion)
         self.connect("enter-notify-event", self._on_mouse_motion)
+        self.connect("window-state-event", self._on_window_state_event)
         self.connect("key-press-event", self._on_key_press)
         self.connect("destroy", self._on_destroy)
 
@@ -164,7 +171,7 @@ class JonakiMainWindow(Gtk.Window):
         self.mpris.start()
 
         # Periodic timer for UI refresh & auto-hide controls
-        GLib.timeout_add(100, self._on_ui_tick)
+        self._ui_timer_id = GLib.timeout_add(100, self._on_ui_tick)
 
         if initial_files:
             self.add_files_to_playlist(initial_files, auto_play=True)
@@ -192,9 +199,14 @@ class JonakiMainWindow(Gtk.Window):
         self.apply_audio_filters()
 
         if getattr(self, "_pending_playback", None):
-            fp, pts = self._pending_playback
+            pending = self._pending_playback
             self._pending_playback = None
-            self.play_file(fp, seek_pts=pts)
+            if len(pending) == 4:
+                fp, pts, sub_f, aud_f = pending
+                self.play_file(fp, seek_pts=pts, sub_file=sub_f, audio_file=aud_f)
+            else:
+                fp, pts = pending[:2]
+                self.play_file(fp, seek_pts=pts)
         elif len(self.playlist) > 0 and self.current_index >= 0:
             self.play_index(self.current_index)
 
@@ -218,12 +230,16 @@ class JonakiMainWindow(Gtk.Window):
             sub_exts = ('.srt', '.ass', '.ssa', '.vtt', '.smi', '.sub')
             subs = [f for f in files if f.lower().endswith(sub_exts)]
             media = [f for f in files if not f.lower().endswith(sub_exts)]
-            if subs:
+            if media:
+                first_sub = subs[0] if subs else None
+                self.add_files_to_playlist(media, auto_play=True, clear_existing=True, sub_file=first_sub)
+                if len(subs) > 1:
+                    for s in subs[1:]:
+                        self.core.load_subtitle(s)
+            elif subs:
                 for s in subs:
                     self.core.load_subtitle(s)
                     self.osd.show_osd(f"Subtitle: {os.path.basename(s)}")
-            if media:
-                self.add_files_to_playlist(media, auto_play=True, clear_existing=True)
             context.finish(True, False, time_val)
         else:
             context.finish(False, False, time_val)
@@ -242,18 +258,23 @@ class JonakiMainWindow(Gtk.Window):
             sub_text = (self.core.get_property("sub-text") or "").strip()
             if sub_text and sub_text != getattr(self, "_last_sub_text", ""):
                 self._last_sub_text = sub_text
+                self._translation_seq += 1
+                seq = self._translation_seq
                 import threading
-                def _trans_worker(txt=sub_text, dst=self.sub_mgr.target_language):
+                def _trans_worker(txt=sub_text, dst=self.sub_mgr.target_language, current_seq=seq):
                     tr = self.translator.translate(txt, dst_lang=dst)
-                    GLib.idle_add(self.osd.set_translated_sub, tr, 4.0)
+                    def _update():
+                        if current_seq == self._translation_seq:
+                            self.osd.set_translated_sub(tr, 4.0)
+                        return False
+                    GLib.idle_add(_update)
                 threading.Thread(target=_trans_worker, daemon=True).start()
             elif not sub_text and getattr(self, "_last_sub_text", ""):
                 self._last_sub_text = ""
 
         # Dynamic overlay layer visibility: Only display osd_layer when idle (for logo)
-        # or when Tab Tech HUD or translated subtitle is requested.
-        # Transient OSD messages during playback are rendered natively via mpv show-text.
-        show_overlay = has_hud or has_sub or is_idle or (has_osd and is_idle)
+        # or when Tab Tech HUD or translated subtitle or OSD message is requested.
+        show_overlay = has_hud or has_sub or is_idle or has_osd
         if show_overlay:
             if not self.osd_layer.get_visible():
                 self.osd_layer.show()
@@ -389,11 +410,22 @@ class JonakiMainWindow(Gtk.Window):
         self.video_area.grab_focus()
         if event.button == 1:
             if event.type == Gdk.EventType._2BUTTON_PRESS:
+                if self._click_timer_id:
+                    GLib.source_remove(self._click_timer_id)
+                    self._click_timer_id = None
                 self.toggle_fullscreen()
-            else:
-                self.core.play_pause()
+            elif event.type == Gdk.EventType.BUTTON_PRESS:
+                if self._click_timer_id:
+                    GLib.source_remove(self._click_timer_id)
+                    self._click_timer_id = None
+                def _do_click():
+                    self._click_timer_id = None
+                    self.core.play_pause()
+                    return False
+                self._click_timer_id = GLib.timeout_add(250, _do_click)
         elif event.button == 3:
             self.context_menu.popup(event, self.core)
+        return True
 
     def _on_video_scroll(self, widget, event):
         if event.direction == Gdk.ScrollDirection.UP:
@@ -402,10 +434,20 @@ class JonakiMainWindow(Gtk.Window):
         elif event.direction == Gdk.ScrollDirection.DOWN:
             self.core.adjust_volume(-2.0)
             self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
+        elif event.direction == Gdk.ScrollDirection.SMOOTH:
+            _, delta_y = event.get_scroll_deltas()
+            if delta_y < 0:
+                self.core.adjust_volume(+2.0)
+                self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
+            elif delta_y > 0:
+                self.core.adjust_volume(-2.0)
+                self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
+        return True
 
     def _on_skin_button_press(self, widget, event):
         self._on_mouse_motion(widget, event)
-        hit = self.skin.hit_test(int(event.x), int(event.y))
+        is_playing = (self.core.state == PlaybackState.PLAYING)
+        hit = self.skin.hit_test(int(event.x), int(event.y), is_playing=is_playing)
         if hit:
             if hit == self.skin.timebar:
                 self.skin.timebar.is_dragging = True
@@ -453,7 +495,14 @@ class JonakiMainWindow(Gtk.Window):
             if self.skin.volume_slider:
                 vx, vy, vw, vh = self.skin.volume_slider.rect
                 self.skin.volume_slider.state = 1 if (vx <= x <= vx + vw and vy - 3 <= y <= vy + vh + 4) else 0
+            is_playing = (self.core.state == PlaybackState.PLAYING)
             for btn in self.skin.buttons + self.skin.badges:
+                if btn == self.skin.btn_play and is_playing:
+                    btn.state = 0
+                    continue
+                if btn == self.skin.btn_pause and not is_playing:
+                    btn.state = 0
+                    continue
                 bx, by, bw, bh = btn.rect
                 if bx <= x <= bx + bw and by <= y <= by + bh:
                     btn.state = 1  # Hover
@@ -464,6 +513,10 @@ class JonakiMainWindow(Gtk.Window):
     # --- Keyboard Shortcut Dispatcher ---
 
     def _on_key_press(self, widget, event):
+        focus = self.get_focus()
+        if isinstance(focus, (Gtk.Entry, Gtk.TextView, Gtk.SearchEntry)):
+            return False
+
         keyval = event.keyval
         state = event.state
 
@@ -499,9 +552,13 @@ class JonakiMainWindow(Gtk.Window):
                 self.toggle_fullscreen()
             return True
 
-        # Left / Right Seeks
+        # Left / Right Seeks & Alt+Left/Right Subtitle Sync
         if keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
-            if ctrl and alt:
+            if alt and not (ctrl or shift):
+                offset = self.sub_mgr.adjust_sync(-0.5)
+                self.core.set_subtitle_delay(offset)
+                self.osd.show_osd(f"Subtitle Sync: {offset:+.1f}s")
+            elif ctrl and alt:
                 self.core.seek_relative(-300.0)
                 self.osd.show_osd("Seek: -5 min")
             elif shift:
@@ -516,7 +573,11 @@ class JonakiMainWindow(Gtk.Window):
             return True
 
         if keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right):
-            if ctrl and alt:
+            if alt and not (ctrl or shift):
+                offset = self.sub_mgr.adjust_sync(+0.5)
+                self.core.set_subtitle_delay(offset)
+                self.osd.show_osd(f"Subtitle Sync: {offset:+.1f}s")
+            elif ctrl and alt:
                 self.core.seek_relative(+300.0)
                 self.osd.show_osd("Seek: +5 min")
             elif shift:
@@ -530,10 +591,13 @@ class JonakiMainWindow(Gtk.Window):
                 self.osd.show_osd("Seek: +5 sec")
             return True
 
-        # Up / Down Volume & Shift+Up/Down Volume Boost (PreAmp)
+        # Up / Down Volume & Shift+Up/Down Volume Boost (PreAmp) & Alt+Up/Down Subtitle Pos
         if keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
-            if shift:
-                self.dsp.audio_boost_db = min(12.0, self.dsp.audio_boost_db + 1.0)
+            if alt and not (ctrl or shift):
+                pos = self.core.adjust_subtitle_pos(-2)
+                self.osd.show_osd(f"Subtitle Position: {pos}%")
+            elif shift:
+                self.dsp.audio_boost_db = min(24.0, self.dsp.audio_boost_db + 1.0)
                 self.apply_audio_filters()
                 self.osd.show_osd(f"Audio Boost PreAmp: +{self.dsp.audio_boost_db:.1f} dB")
             else:
@@ -542,7 +606,10 @@ class JonakiMainWindow(Gtk.Window):
             return True
 
         if keyval in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
-            if shift:
+            if alt and not (ctrl or shift):
+                pos = self.core.adjust_subtitle_pos(+2)
+                self.osd.show_osd(f"Subtitle Position: {pos}%")
+            elif shift:
                 self.dsp.audio_boost_db = max(0.0, self.dsp.audio_boost_db - 1.0)
                 self.apply_audio_filters()
                 self.osd.show_osd(f"Audio Boost PreAmp: +{self.dsp.audio_boost_db:.1f} dB")
@@ -558,22 +625,46 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd(f"Auto Volume Control (Normalizer): {'ON' if self.dsp.normalizer_enabled else 'OFF'}")
             return True
 
+        # Shift+E: Toggle Audio Enhancement (PotPlayer-style loudness & speech boost)
+        if shift and keyval in (Gdk.KEY_e, Gdk.KEY_E) and not (ctrl or alt):
+            self.toggle_audio_enhancement()
+            return True
+
         # Audio Track & Audio Sync
         if keyval in (Gdk.KEY_a, Gdk.KEY_A) and not ctrl:
             self.core.cycle_audio_track()
             self.osd.show_osd("Audio Track Cycled")
             return True
         if shift and keyval == Gdk.KEY_bracketleft:
-            self.core.set_audio_delay(-0.05)
-            self.osd.show_osd("Audio Sync: -50 ms")
+            new_delay = round(self.core.audio_delay_sec - 0.05, 3)
+            self.core.set_audio_delay(new_delay)
+            self.osd.show_osd(f"Audio Sync: {new_delay * 1000:+.0f} ms")
             return True
         if shift and keyval == Gdk.KEY_bracketright:
-            self.core.set_audio_delay(+0.05)
-            self.osd.show_osd("Audio Sync: +50 ms")
+            new_delay = round(self.core.audio_delay_sec + 0.05, 3)
+            self.core.set_audio_delay(new_delay)
+            self.osd.show_osd(f"Audio Sync: {new_delay * 1000:+.0f} ms")
             return True
         if shift and keyval == Gdk.KEY_backslash:
             self.core.set_audio_delay(0.0)
             self.osd.show_osd("Audio Sync: 0.0s (Reset)")
+            return True
+
+        # Subtitle Sync: [ / ] (-0.5s / +0.5s per README)
+        if not (ctrl or alt or shift) and keyval == Gdk.KEY_bracketleft:
+            offset = self.sub_mgr.adjust_sync(-0.5)
+            self.core.set_subtitle_delay(offset)
+            self.osd.show_osd(f"Subtitle Sync: {offset:+.1f}s")
+            return True
+        if not (ctrl or alt or shift) and keyval == Gdk.KEY_bracketright:
+            offset = self.sub_mgr.adjust_sync(+0.5)
+            self.core.set_subtitle_delay(offset)
+            self.osd.show_osd(f"Subtitle Sync: {offset:+.1f}s")
+            return True
+        if not (ctrl or alt or shift) and keyval == Gdk.KEY_backslash:
+            self.sub_mgr.reset_sync()
+            self.core.set_subtitle_delay(0.0)
+            self.osd.show_osd("Subtitle Sync: 0.0s (Reset)")
             return True
 
         # Subtitles: S (Cycle Primary), Shift+S (Cycle Secondary), Alt+O (Open), Alt+H (Visibility), Alt+Left/Right (Sync), Alt+PgUp/PgDn (Size), Alt+Up/Down (Pos)
@@ -683,9 +774,9 @@ class JonakiMainWindow(Gtk.Window):
 
         # Window Sizing & Stay On Top
         if ctrl and keyval in (Gdk.KEY_t, Gdk.KEY_T):
-            is_top = not self.get_property("keep-above")
-            self.set_keep_above(is_top)
-            self.osd.show_osd(f"Stay on Top: {'ON' if is_top else 'OFF'}")
+            self._is_keep_above = not getattr(self, "_is_keep_above", False)
+            self.set_keep_above(self._is_keep_above)
+            self.osd.show_osd(f"Stay on Top: {'ON' if self._is_keep_above else 'OFF'}")
             return True
         if alt and keyval in (Gdk.KEY_1, Gdk.KEY_KP_1):
             w = int(self.core.video_width * 0.5) if self.core.video_width > 0 else 640
@@ -740,14 +831,14 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd(f"Speed: {self.core.speed:.1f}x")
             return True
 
-        # A-B Repeat: [, ], \
-        if keyval == Gdk.KEY_bracketleft and not shift:
+        # A-B Repeat: Ctrl+[, Ctrl+], Ctrl+\
+        if ctrl and keyval == Gdk.KEY_bracketleft:
             self.set_repeat_a()
             return True
-        if keyval == Gdk.KEY_bracketright and not shift:
+        if ctrl and keyval == Gdk.KEY_bracketright:
             self.set_repeat_b()
             return True
-        if keyval == Gdk.KEY_backslash:
+        if ctrl and keyval == Gdk.KEY_backslash:
             self.core.clear_repeat()
             self.osd.show_osd("A-B Repeat: Cleared")
             return True
@@ -778,7 +869,7 @@ class JonakiMainWindow(Gtk.Window):
         # Tab: Technical Info HUD
         if keyval == Gdk.KEY_Tab:
             self.osd.toggle_tech_info()
-            self.video_area.queue_draw()
+            self.osd_layer.queue_draw()
             return True
 
         # Function Keys: F1 (About / Ctrl+F1: Media Info), F4 (Close), F5 (Prefs), F6 (Control Box), F7 (Equalizer), F8/F12 (Playlist)
@@ -788,48 +879,72 @@ class JonakiMainWindow(Gtk.Window):
             else:
                 self.handle_command("CMD_ABOUT_DIALOG")
             return True
-        if keyval == Gdk.KEY_F4:
-            self.core.stop()
+        if keyval == Gdk.KEY_F4 and not alt:
+            self.handle_command("CMD_MEDIA_CLOSE")
+            return True
+        if keyval == Gdk.KEY_F5:
+            self.control_box.show_all()
             return True
         if keyval == Gdk.KEY_F6:
             self.control_box.show_all()
             return True
         if keyval == Gdk.KEY_F7:
             self.control_box.show_all()
-            # Switch to Audio tab
+            if hasattr(self.control_box, "select_tab"):
+                self.control_box.select_tab(0)
             return True
         if keyval in (Gdk.KEY_F8, Gdk.KEY_F12):
             self.playlist_window.show_all()
             return True
 
-        # Capture: Ctrl+P, Ctrl+Alt+G (GIF), Ctrl+Alt+S (Storyboard)
-        if ctrl and keyval in (Gdk.KEY_p, Gdk.KEY_P):
+        # Capture: Ctrl+P (Snapshot), Ctrl+E (Save Frame As), Ctrl+C (Copy Frame), Ctrl+Alt+G (GIF), Ctrl+Alt+S (Search Subtitles Online)
+        if ctrl and not alt and keyval in (Gdk.KEY_p, Gdk.KEY_P):
             self.handle_command("CMD_CAPTURE_FRAME")
+            return True
+        if ctrl and not alt and keyval in (Gdk.KEY_e, Gdk.KEY_E):
+            self.handle_command("CMD_CAPTURE_FRAME_AS")
+            return True
+        if ctrl and not alt and keyval in (Gdk.KEY_c, Gdk.KEY_C):
+            self.handle_command("CMD_CAPTURE_TO_CLIPBOARD")
             return True
         if ctrl and alt and keyval in (Gdk.KEY_g, Gdk.KEY_G):
             self.handle_command("CMD_CREATE_GIF")
             return True
         if ctrl and alt and keyval in (Gdk.KEY_s, Gdk.KEY_S):
-            self.handle_command("CMD_CREATE_STORYBOARD")
+            self.handle_command("CMD_SUB_ONLINE_SEARCH")
+            return True
+
+        # Additional Documented Shortcuts: Ctrl+F11 (Deinterlace), Ctrl+H (HDR), Ctrl+S (Screen Capture), Ctrl+J (Webcam)
+        if ctrl and keyval == Gdk.KEY_F11:
+            self.handle_command("CMD_DEINTERLACE_TOGGLE")
+            return True
+        if ctrl and not alt and keyval in (Gdk.KEY_h, Gdk.KEY_H):
+            self.handle_command("CMD_TOGGLE_HDR")
+            return True
+        if ctrl and not alt and not shift and keyval in (Gdk.KEY_s, Gdk.KEY_S):
+            self.handle_command("CMD_OPEN_SCREEN_CAPTURE")
+            return True
+        if ctrl and not alt and keyval in (Gdk.KEY_j, Gdk.KEY_J):
+            self.handle_command("CMD_OPEN_WEBCAM")
             return True
 
         # Colors: Q (Reset), W/E (Brightness), R/T (Contrast), Y/U (Saturation), I/O (Hue)
-        if keyval in (Gdk.KEY_q, Gdk.KEY_Q):
+        if keyval in (Gdk.KEY_q, Gdk.KEY_Q) and not (ctrl or alt):
             self.shader_mgr.reset_colors()
             self.core.set_video_colors(0, 0, 0, 0, 0)
             self.osd.show_osd("Video Colors: Reset")
             return True
-        if keyval in (Gdk.KEY_w, Gdk.KEY_W):
+        if keyval in (Gdk.KEY_w, Gdk.KEY_W) and not (ctrl or alt):
             self.shader_mgr.brightness = max(-100, self.shader_mgr.brightness - 1)
             self.core.set_video_colors(self.shader_mgr.brightness, self.shader_mgr.contrast, self.shader_mgr.saturation, self.shader_mgr.hue, 0)
             self.osd.show_osd(f"Brightness: {self.shader_mgr.brightness}%")
             return True
-        if keyval in (Gdk.KEY_e, Gdk.KEY_E):
+        if keyval in (Gdk.KEY_e, Gdk.KEY_E) and not (ctrl or alt):
             self.shader_mgr.brightness = min(100, self.shader_mgr.brightness + 1)
             self.core.set_video_colors(self.shader_mgr.brightness, self.shader_mgr.contrast, self.shader_mgr.saturation, self.shader_mgr.hue, 0)
             self.osd.show_osd(f"Brightness: {self.shader_mgr.brightness}%")
             return True
-        if keyval in (Gdk.KEY_r, Gdk.KEY_R):
+        if keyval in (Gdk.KEY_r, Gdk.KEY_R) and not (ctrl or alt):
             self.shader_mgr.contrast = max(-100, self.shader_mgr.contrast - 1)
             self.core.set_video_colors(self.shader_mgr.brightness, self.shader_mgr.contrast, self.shader_mgr.saturation, self.shader_mgr.hue, 0)
             self.osd.show_osd(f"Contrast: {self.shader_mgr.contrast}%")
@@ -838,6 +953,26 @@ class JonakiMainWindow(Gtk.Window):
             self.shader_mgr.contrast = min(100, self.shader_mgr.contrast + 1)
             self.core.set_video_colors(self.shader_mgr.brightness, self.shader_mgr.contrast, self.shader_mgr.saturation, self.shader_mgr.hue, 0)
             self.osd.show_osd(f"Contrast: {self.shader_mgr.contrast}%")
+            return True
+        if keyval in (Gdk.KEY_y, Gdk.KEY_Y) and not (ctrl or alt):
+            self.shader_mgr.saturation = max(-100, self.shader_mgr.saturation - 1)
+            self.core.set_video_colors(self.shader_mgr.brightness, self.shader_mgr.contrast, self.shader_mgr.saturation, self.shader_mgr.hue, 0)
+            self.osd.show_osd(f"Saturation: {self.shader_mgr.saturation}%")
+            return True
+        if keyval in (Gdk.KEY_u, Gdk.KEY_U) and not (ctrl or alt):
+            self.shader_mgr.saturation = min(100, self.shader_mgr.saturation + 1)
+            self.core.set_video_colors(self.shader_mgr.brightness, self.shader_mgr.contrast, self.shader_mgr.saturation, self.shader_mgr.hue, 0)
+            self.osd.show_osd(f"Saturation: {self.shader_mgr.saturation}%")
+            return True
+        if keyval in (Gdk.KEY_i, Gdk.KEY_I) and not (ctrl or alt):
+            self.shader_mgr.hue = max(-100, self.shader_mgr.hue - 1)
+            self.core.set_video_colors(self.shader_mgr.brightness, self.shader_mgr.contrast, self.shader_mgr.saturation, self.shader_mgr.hue, 0)
+            self.osd.show_osd(f"Hue: {self.shader_mgr.hue}%")
+            return True
+        if keyval in (Gdk.KEY_o, Gdk.KEY_O) and not (ctrl or alt):
+            self.shader_mgr.hue = min(100, self.shader_mgr.hue + 1)
+            self.core.set_video_colors(self.shader_mgr.brightness, self.shader_mgr.contrast, self.shader_mgr.saturation, self.shader_mgr.hue, 0)
+            self.osd.show_osd(f"Hue: {self.shader_mgr.hue}%")
             return True
 
         return False
@@ -848,6 +983,7 @@ class JonakiMainWindow(Gtk.Window):
         if cmd_id in ("CMD_MEDIA_PLAY", "CMD_MEDIA_PAUSE", "CMD_MEDIA_PLAY_PAUSE"):
             self.core.play_pause()
         elif cmd_id == "CMD_MEDIA_CLOSE":
+            self._save_current_position()
             self.core.stop()
         elif cmd_id == "ID_PLAYBACK_5SEC_BACK":
             self.core.seek_relative(-5.0)
@@ -864,7 +1000,7 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id == "CMD_OPEN_URL":
             self._open_url_dialog()
         elif cmd_id == "CMD_OPEN_SCREEN_CAPTURE":
-            self.play_file("v4l2:///dev/video0")
+            self.play_file("avdevice://lavfi:x11grab")
             self.osd.show_osd("Screen Capture Device")
         elif cmd_id == "CMD_OPEN_WEBCAM":
             self.play_file("v4l2:///dev/video0")
@@ -882,7 +1018,7 @@ class JonakiMainWindow(Gtk.Window):
             self._open_url_dialog()
         elif cmd_id == "CMD_OSD_PLAYINFO":
             self.osd.toggle_tech_info()
-            self.video_area.queue_draw()
+            self.osd_layer.queue_draw()
         elif cmd_id in ("CMD_TOGGLE_HWDEC", "CMD_VIDEO_OUT_HW_SW_MESSAGE"):
             self.core.toggle_hwdec()
             self.osd.show_osd(f"Hardware Acceleration: {'ON (HW)' if self.core.hwdec_active != 'no' else 'OFF (SW)'}")
@@ -898,14 +1034,19 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd("Video Colors: Reset")
         elif cmd_id == "CMD_SHADER_SHARPEN":
             self.shader_mgr.enable_shader("sharpen.hook")
+            self.core.set_glsl_shaders(self.shader_mgr.get_glsl_shaders_string())
             self.osd.show_osd("Pixel Shader: Sharpen 3x3")
         elif cmd_id == "CMD_SHADER_ADAPTIVE_SHARPEN":
             self.shader_mgr.enable_shader("adaptive_sharpen.hook")
+            self.core.set_glsl_shaders(self.shader_mgr.get_glsl_shaders_string())
             self.osd.show_osd("Pixel Shader: Adaptive Sharpen")
         elif cmd_id == "CMD_SHADER_DENOISE":
+            self.shader_mgr.enable_shader("denoise.hook")
+            self.core.set_glsl_shaders(self.shader_mgr.get_glsl_shaders_string())
             self.osd.show_osd("Pixel Shader: Denoise")
         elif cmd_id == "CMD_SHADER_CLEAR":
             self.shader_mgr.active_shaders.clear()
+            self.core.set_glsl_shaders(self.shader_mgr.get_glsl_shaders_string())
             self.osd.show_osd("Pixel Shaders: Cleared")
         elif cmd_id == "CMD_CYCLE_AUDIO_TRACK":
             self.core.cycle_audio_track()
@@ -917,6 +1058,11 @@ class JonakiMainWindow(Gtk.Window):
             self.dsp.normalizer_enabled = not self.dsp.normalizer_enabled
             self.apply_audio_filters()
             self.osd.show_osd(f"Auto Volume Control: {'ON' if self.dsp.normalizer_enabled else 'OFF'}")
+        elif cmd_id == "CMD_AUDIO_ENHANCE_TOGGLE":
+            self.toggle_audio_enhancement()
+        elif cmd_id.startswith("CMD_AUDIO_ENHANCE_PRESET_"):
+            preset_name = cmd_id.replace("CMD_AUDIO_ENHANCE_PRESET_", "").replace("_", " ")
+            self.set_audio_enhancement_preset(preset_name)
         elif cmd_id == "CMD_SUB_OPEN":
             self._open_subtitle_dialog()
         elif cmd_id == "CMD_SUB_VISIBILITY":
@@ -956,14 +1102,28 @@ class JonakiMainWindow(Gtk.Window):
                 self.osd.show_osd("Snapshot Copied to Clipboard")
         elif cmd_id == "CMD_CREATE_GIF":
             if self.core.current_file:
-                gif_path = self.capture_mgr.create_animated_gif(self.core.current_file, self.core.position, 5.0)
-                if gif_path:
-                    self.osd.show_osd(f"GIF Created: {os.path.basename(gif_path)}")
+                cur_f = self.core.current_file
+                pos = self.core.position
+                self.osd.show_osd("Creating Animated GIF...")
+                def _worker_gif():
+                    gif_path = self.capture_mgr.create_animated_gif(cur_f, pos, 5.0)
+                    if gif_path:
+                        GLib.idle_add(lambda: self.osd.show_osd(f"GIF Created: {os.path.basename(gif_path)}"))
+                    else:
+                        GLib.idle_add(lambda: self.osd.show_osd("Failed to create GIF"))
+                threading.Thread(target=_worker_gif, daemon=True).start()
         elif cmd_id == "CMD_CREATE_STORYBOARD":
             if self.core.current_file:
-                sb_path = self.capture_mgr.create_storyboard(self.core.current_file, self.core.duration)
-                if sb_path:
-                    self.osd.show_osd(f"Storyboard Created: {os.path.basename(sb_path)}")
+                cur_f = self.core.current_file
+                dur = self.core.duration
+                self.osd.show_osd("Creating Storyboard...")
+                def _worker_sb():
+                    sb_path = self.capture_mgr.create_storyboard(cur_f, dur)
+                    if sb_path:
+                        GLib.idle_add(lambda: self.osd.show_osd(f"Storyboard Created: {os.path.basename(sb_path)}"))
+                    else:
+                        GLib.idle_add(lambda: self.osd.show_osd("Failed to create Storyboard"))
+                threading.Thread(target=_worker_sb, daemon=True).start()
         elif cmd_id == "CMD_MEDIA_INFO_DIALOG":
             self.show_media_info_dialog()
         elif cmd_id == "CMD_SET_AUDIO_TRACK":
@@ -1114,6 +1274,19 @@ class JonakiMainWindow(Gtk.Window):
             self._last_mouse_move_time = time.time()
             self._set_cursor_visible(True)
 
+    def _on_window_state_event(self, widget, event):
+        is_fs = bool(event.new_window_state & Gdk.WindowState.FULLSCREEN)
+        if self.is_fullscreen != is_fs:
+            self.is_fullscreen = is_fs
+            if not self.is_fullscreen:
+                self.skin_area.show()
+                self._controls_visible = True
+                self._set_cursor_visible(True)
+            else:
+                self._last_mouse_move_time = time.time()
+                self._set_cursor_visible(True)
+        return False
+
     # --- Core Event Callbacks ---
 
     def _on_core_time_update(self, pos: float, dur: float):
@@ -1126,6 +1299,17 @@ class JonakiMainWindow(Gtk.Window):
             self.mpris.notify_playback_changed()
 
     def _on_core_file_end(self):
+        if self.core.current_file:
+            try:
+                self.db.save_playback_position(
+                    self.core.current_file,
+                    self.core.position,
+                    duration=self.core.duration,
+                    title=self.core.current_title or os.path.basename(self.core.current_file)
+                )
+            except Exception as e:
+                print(f"[MediaDB] Failed to save resume position on file end: {e}")
+
         # Auto-play next in playlist
         if self.current_index + 1 < len(self.playlist):
             self.play_index(self.current_index + 1)
@@ -1134,7 +1318,8 @@ class JonakiMainWindow(Gtk.Window):
 
     # --- Playlist & Playback Management ---
 
-    def add_files_to_playlist(self, file_paths: List[str], auto_play: bool = False, clear_existing: bool = False) -> None:
+    def add_files_to_playlist(self, file_paths: List[str], auto_play: bool = False, clear_existing: bool = False,
+                               seek_pts: float = 0.0, sub_file: Optional[str] = None, audio_file: Optional[str] = None) -> None:
         if clear_existing:
             self.playlist.clear()
             self.current_index = -1
@@ -1150,13 +1335,27 @@ class JonakiMainWindow(Gtk.Window):
 
         if auto_play and len(self.playlist) > 0:
             target_index = start_index if start_index < len(self.playlist) else 0
-            self.play_index(target_index)
+            self.play_index(target_index, seek_pts=seek_pts, sub_file=sub_file, audio_file=audio_file)
 
-    def play_index(self, index: int) -> None:
+    def _save_current_position(self) -> None:
+        pos = getattr(self.core, "position", None)
+        if self.core.current_file and isinstance(pos, (int, float)) and pos > 5.0:
+            try:
+                self.db.save_playback_position(
+                    self.core.current_file,
+                    pos,
+                    duration=getattr(self.core, "duration", 0.0),
+                    title=self.core.current_title or os.path.basename(self.core.current_file)
+                )
+            except Exception as e:
+                print(f"[MediaDB] Failed to save playback position: {e}")
+
+    def play_index(self, index: int, seek_pts: float = 0.0, sub_file: Optional[str] = None, audio_file: Optional[str] = None) -> None:
         if 0 <= index < len(self.playlist):
+            self._save_current_position()
             self.current_index = index
             item = self.playlist[index]
-            self.play_file(item["path"])
+            self.play_file(item["path"], seek_pts=seek_pts, sub_file=sub_file, audio_file=audio_file)
 
     def play_next(self) -> None:
         if len(self.playlist) > 0 and self.current_index + 1 < len(self.playlist):
@@ -1181,6 +1380,7 @@ class JonakiMainWindow(Gtk.Window):
                     new_idx = min(index, len(self.playlist) - 1)
                     self.play_index(new_idx)
                 else:
+                    self._save_current_position()
                     self.core.stop()
                     self.current_index = -1
             elif index < self.current_index:
@@ -1198,7 +1398,6 @@ class JonakiMainWindow(Gtk.Window):
         self.playlist_window.update_playlist(self.playlist)
 
     def shuffle_playlist(self) -> None:
-        import random
         cur_path = self.playlist[self.current_index]["path"] if 0 <= self.current_index < len(self.playlist) else None
         random.shuffle(self.playlist)
         if cur_path:
@@ -1210,15 +1409,21 @@ class JonakiMainWindow(Gtk.Window):
 
     def set_subtitle_size(self, size_pt: int) -> None:
         self.sub_mgr.font_size = size_pt
+        self.core.set_subtitle_font_size(size_pt)
         self.osd.show_osd(f"Subtitle Size: {size_pt} pt")
+
+    def set_subtitle_sync(self, offset_sec: float) -> None:
+        self.sub_mgr.sync_offset_sec = offset_sec
+        self.core.set_subtitle_delay(offset_sec)
+        self.osd.show_osd(f"Subtitle Sync: {offset_sec:+.1f}s")
 
     def toggle_translation(self, active: bool) -> None:
         self.sub_mgr.translation_enabled = active
         self.osd.show_osd(f"AI Subtitle Translation: {'ON' if active else 'OFF'}")
 
-    def play_file(self, file_path: str, seek_pts: float = 0.0) -> None:
+    def play_file(self, file_path: str, seek_pts: float = 0.0, sub_file: Optional[str] = None, audio_file: Optional[str] = None) -> None:
         if self.core.wid is None:
-            self._pending_playback = (file_path, seek_pts)
+            self._pending_playback = (file_path, seek_pts, sub_file, audio_file)
             self.set_title(f"Jonaki - {os.path.basename(file_path)}")
             return
 
@@ -1228,9 +1433,8 @@ class JonakiMainWindow(Gtk.Window):
                 seek_pts = saved_pts
                 self.osd.show_osd(f"Resumed at {self.skin._format_time(saved_pts)}")
 
-        self.core.load_file(file_path, start_pts=seek_pts)
+        self.core.load_file(file_path, start_pts=seek_pts, sub_file=sub_file, audio_file=audio_file)
         self.set_title(f"Jonaki - {os.path.basename(file_path)}")
-        self.core.play()
         self.apply_audio_filters()
         if hasattr(self, "mpris") and self.mpris:
             self.mpris.notify_playback_changed()
@@ -1245,15 +1449,44 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd(f"A-B Repeat: Point B Set ({self.skin._format_time(pts)})")
 
     def apply_audio_filters(self) -> None:
-        for idx in range(10):
-            gain = self.equalizer.get_band(idx)
-            self.core.set_equalizer_band(idx, gain)
-        self.core.set_audio_boost(self.dsp.audio_boost_db)
-        self.core.set_normalizer(self.dsp.normalizer_enabled)
+        if not self.equalizer.enabled:
+            self.core.equalizer_bands = [0.0] * 10
+            eq_filter = ""
+        else:
+            for idx in range(10):
+                self.core.equalizer_bands[idx] = self.equalizer.get_band(idx)
+            eq_filter = self.equalizer.to_filter_string()
+        filter_chain = self.dsp.build_filter_chain(eq_filter)
+        self.core.set_property("af", filter_chain)
 
     def toggle_normalizer(self, active: bool) -> None:
         self.dsp.normalizer_enabled = active
         self.apply_audio_filters()
+
+    def toggle_audio_enhancement(self, enabled: Optional[bool] = None) -> None:
+        if enabled is None:
+            new_state = not self.dsp.enhancement_enabled
+        else:
+            new_state = bool(enabled)
+        self.dsp.set_enhancement_enabled(new_state)
+        self.db.set_setting("audio_enhancement_enabled", "1" if self.dsp.enhancement_enabled else "0")
+        self.db.set_setting("audio_enhancement_preset", self.dsp.enhancement_preset)
+        self.apply_audio_filters()
+        st = "ON" if self.dsp.enhancement_enabled else "OFF"
+        self.osd.show_osd(f"Audio Enhancement: {st} ({self.dsp.enhancement_preset})")
+
+    def set_audio_enhancement_preset(self, preset_name: str) -> None:
+        if self.dsp.set_enhancement_preset(preset_name):
+            self.db.set_setting("audio_enhancement_preset", preset_name)
+            self.db.set_setting("audio_enhancement_enabled", "1" if self.dsp.enhancement_enabled else "0")
+            self.apply_audio_filters()
+            self.osd.show_osd(f"Audio Enhancement Preset: {preset_name}")
+
+    def set_audio_enhancement_gain(self, gain_db: float) -> None:
+        self.dsp.set_enhancement_gain(gain_db)
+        self.db.set_setting("audio_enhancement_gain", str(self.dsp.enhancement_gain_db))
+        self.apply_audio_filters()
+        self.osd.show_osd(f"Audio Enhancement Gain: +{self.dsp.enhancement_gain_db:.1f} dB")
 
     def _open_file_dialog(self) -> None:
         dialog = Gtk.FileChooserDialog(title="Open Media File(s)", parent=self,
@@ -1305,6 +1538,8 @@ class JonakiMainWindow(Gtk.Window):
         entry = Gtk.Entry()
         entry.set_placeholder_text("https://... or rtsp://...")
         entry.set_width_chars(50)
+        entry.set_activates_default(True)
+        dialog.set_default_response(Gtk.ResponseType.OK)
         box.add(entry)
         dialog.show_all()
         if dialog.run() == Gtk.ResponseType.OK:
@@ -1381,7 +1616,14 @@ class JonakiMainWindow(Gtk.Window):
         sub_filter.set_name("Subtitle Files (*.srt, *.ass, *.ssa, *.vtt, *.smi)")
         for ext in ["*.srt", "*.ass", "*.ssa", "*.vtt", "*.smi", "*.sub"]:
             sub_filter.add_pattern(ext)
+            sub_filter.add_pattern(ext.upper())
         dialog.add_filter(sub_filter)
+
+        all_filter = Gtk.FileFilter()
+        all_filter.set_name("All Files (*)")
+        all_filter.add_pattern("*")
+        dialog.add_filter(all_filter)
+
         if dialog.run() == Gtk.ResponseType.OK:
             sub_file = dialog.get_filename()
             if sub_file:
@@ -1396,23 +1638,26 @@ class JonakiMainWindow(Gtk.Window):
         about.set_copyright("Jonaki Open Source Project")
         about.set_comments("Modern high-performance media player for Linux, inspired by PotPlayer.\nNative in-process libmpv hardware playback with zero external dependencies.")
         about.set_license_type(Gtk.License.GPL_3_0)
-        about.set_website("https://github.com/jonaki-player/jonaki")
+        about.set_website("https://github.com/ashik-himel/JonakiPlayer")
         about.run()
         about.destroy()
 
     def _on_destroy(self, widget):
+        if getattr(self, "_ui_timer_id", None):
+            try:
+                GLib.source_remove(self._ui_timer_id)
+            except Exception:
+                pass
+            self._ui_timer_id = None
+        if getattr(self, "_click_timer_id", None):
+            try:
+                GLib.source_remove(self._click_timer_id)
+            except Exception:
+                pass
+            self._click_timer_id = None
         if hasattr(self, "mpris") and self.mpris:
             self.mpris.stop()
-        if self.core.current_file and self.core.position > 5.0:
-            try:
-                self.db.save_playback_position(
-                    self.core.current_file,
-                    self.core.position,
-                    duration=self.core.duration,
-                    title=self.core.current_title or os.path.basename(self.core.current_file)
-                )
-            except Exception as e:
-                print(f"[MediaDB] Failed to save resume position on exit: {e}")
+        self._save_current_position()
         self.core.stop_engine()
         if Gtk.main_level() > 0:
             Gtk.main_quit()

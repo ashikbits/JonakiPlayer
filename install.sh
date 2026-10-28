@@ -17,7 +17,7 @@ mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
 chmod +x "$SCRIPT_DIR/bin/jonaki"
 chmod +x "$SCRIPT_DIR/bin/potplayer"
 ln -sf "$SCRIPT_DIR/bin/jonaki" "$HOME/.local/bin/jonaki"
-ln -sf "$SCRIPT_DIR/bin/jonaki" "$HOME/.local/bin/potplayer"
+ln -sf "$SCRIPT_DIR/bin/potplayer" "$HOME/.local/bin/potplayer"
 echo "[+] Linked launcher to $HOME/.local/bin/jonaki (and alias potplayer)"
 
 # 3. Install App Icon
@@ -32,7 +32,7 @@ cat <<EOF > "$DESKTOP_FILE"
 Name=Jonaki
 GenericName=Multimedia Player
 Comment=High-performance media player for Linux, inspired by PotPlayer
-Exec=$HOME/.local/bin/jonaki %U
+Exec="$HOME/.local/bin/jonaki" %U
 Icon=jonaki
 Terminal=false
 Type=Application
@@ -61,4 +61,7 @@ fi
 
 echo ""
 echo "=== Installation Complete! ==="
+if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+    echo "Warning: Add $HOME/.local/bin to your PATH to run jonaki from terminal."
+fi
 echo "You can now run 'jonaki' (or 'potplayer') from your terminal or launch Jonaki from your Application Menu."

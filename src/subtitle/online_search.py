@@ -19,16 +19,17 @@ def compute_opensubtitles_hash(file_path: str) -> Optional[str]:
     """
     try:
         file_size = os.path.getsize(file_path)
-        if file_size < 65536 * 2:
+        if file_size < 65536:
             return None
 
         hash_val = file_size
-        fmt = "<8s"  # 64-bit little endian
 
         with open(file_path, "rb") as f:
             # First 64KB (8192 64-bit integers)
             for _ in range(8192):
                 chunk = f.read(8)
+                if len(chunk) < 8:
+                    chunk = chunk.ljust(8, b"\0")
                 (val,) = struct.unpack("<Q", chunk)
                 hash_val = (hash_val + val) & 0xFFFFFFFFFFFFFFFF
 
@@ -36,6 +37,8 @@ def compute_opensubtitles_hash(file_path: str) -> Optional[str]:
             f.seek(max(0, file_size - 65536), os.SEEK_SET)
             for _ in range(8192):
                 chunk = f.read(8)
+                if len(chunk) < 8:
+                    chunk = chunk.ljust(8, b"\0")
                 (val,) = struct.unpack("<Q", chunk)
                 hash_val = (hash_val + val) & 0xFFFFFFFFFFFFFFFF
 
@@ -63,14 +66,16 @@ class SubtitleSearchClient:
         try:
             with urllib.request.urlopen(req, timeout=4.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                for item in data:
-                    results.append({
-                        "title": item.get("MovieReleaseName", item.get("SubFileName", "")),
-                        "language": item.get("LanguageName", lang),
-                        "format": item.get("SubFormat", "srt"),
-                        "download_url": item.get("SubDownloadLink", ""),
-                        "rating": item.get("SubRating", "0.0")
-                    })
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict):
+                            results.append({
+                                "title": item.get("MovieReleaseName", item.get("SubFileName", "")),
+                                "language": item.get("LanguageName", lang),
+                                "format": item.get("SubFormat", "srt"),
+                                "download_url": item.get("SubDownloadLink", ""),
+                                "rating": item.get("SubRating", "0.0")
+                            })
         except Exception as e:
             print(f"[SubtitleSearch] Hash search failed: {e}")
 
@@ -83,14 +88,16 @@ class SubtitleSearchClient:
         try:
             with urllib.request.urlopen(req, timeout=4.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                for item in data:
-                    results.append({
-                        "title": item.get("MovieReleaseName", item.get("SubFileName", "")),
-                        "language": item.get("LanguageName", lang),
-                        "format": item.get("SubFormat", "srt"),
-                        "download_url": item.get("SubDownloadLink", ""),
-                        "rating": item.get("SubRating", "0.0")
-                    })
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict):
+                            results.append({
+                                "title": item.get("MovieReleaseName", item.get("SubFileName", "")),
+                                "language": item.get("LanguageName", lang),
+                                "format": item.get("SubFormat", "srt"),
+                                "download_url": item.get("SubDownloadLink", ""),
+                                "rating": item.get("SubRating", "0.0")
+                            })
         except Exception as e:
             print(f"[SubtitleSearch] Query search failed: {e}")
 
@@ -111,7 +118,8 @@ class SubtitleSearchClient:
                     try:
                         data = gzip.decompress(data)
                     except Exception as gz_err:
-                        print(f"[SubtitleSearch] Gzip decompression notice: {gz_err}")
+                        print(f"[SubtitleSearch] Gzip decompression failed: {gz_err}")
+                        return False
                 with open(output_path, "wb") as f:
                     f.write(data)
             return True

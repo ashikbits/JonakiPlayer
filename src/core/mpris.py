@@ -6,6 +6,8 @@ Uses Gio GDBus native integration with the GLib main loop.
 """
 
 import os
+import math
+from pathlib import Path
 from typing import Any, Optional, Dict
 import gi
 gi.require_version('Gio', '2.0')
@@ -105,13 +107,22 @@ class MPRIS2Service:
         Unregisters D-Bus name and object.
         """
         if self.connection and self.reg_id_root:
-            self.connection.unregister_object(self.reg_id_root)
+            try:
+                self.connection.unregister_object(self.reg_id_root)
+            except Exception:
+                pass
             self.reg_id_root = 0
         if self.connection and self.reg_id_player:
-            self.connection.unregister_object(self.reg_id_player)
+            try:
+                self.connection.unregister_object(self.reg_id_player)
+            except Exception:
+                pass
             self.reg_id_player = 0
         if self.owner_id:
-            Gio.bus_unown_name(self.owner_id)
+            try:
+                Gio.bus_unown_name(self.owner_id)
+            except Exception:
+                pass
             self.owner_id = 0
 
     def _on_bus_acquired(self, connection: Gio.DBusConnection, name: str) -> None:
@@ -216,8 +227,10 @@ class MPRIS2Service:
             invocation.return_value(None)
         elif method_name == "SetPosition":
             (track_id, position_us) = parameters.unpack()
-            pos_sec = position_us / 1000000.0
-            core.seek_absolute(pos_sec)
+            if track_id == "/org/mpris/MediaPlayer2/CurrentTrack" and position_us >= 0:
+                pos_sec = position_us / 1000000.0
+                if not core.duration or pos_sec <= core.duration:
+                    core.seek_absolute(pos_sec)
             invocation.return_value(None)
         elif method_name == "OpenUri":
             (uri,) = parameters.unpack()
@@ -238,7 +251,15 @@ class MPRIS2Service:
                     status = "Paused"
             return GLib.Variant("s", status)
         elif prop_name == "LoopStatus":
-            return GLib.Variant("s", "None")
+            loop_status = "None"
+            if core:
+                loop_file = core.get_property("loop-file")
+                loop_playlist = core.get_property("loop-playlist")
+                if loop_file == "inf":
+                    loop_status = "Track"
+                elif loop_playlist == "inf":
+                    loop_status = "Playlist"
+            return GLib.Variant("s", loop_status)
         elif prop_name == "Rate":
             speed = core.speed if core else 1.0
             return GLib.Variant("d", float(speed))
@@ -248,7 +269,8 @@ class MPRIS2Service:
             vol = (core.volume / 100.0) if core else 1.0
             return GLib.Variant("d", max(0.0, min(1.0, float(vol))))
         elif prop_name == "Position":
-            pos_us = int((core.position if core else 0.0) * 1000000)
+            pos = core.position if core else 0.0
+            pos_us = int(pos * 1000000) if (math.isfinite(pos) and pos >= 0) else 0
             return GLib.Variant("x", pos_us)
         elif prop_name == "MinimumRate":
             return GLib.Variant("d", 0.1)
@@ -270,20 +292,38 @@ class MPRIS2Service:
         elif prop_name == "Rate":
             core.set_speed(value.get_double())
             return True
+        elif prop_name == "LoopStatus":
+            status_str = value.get_string()
+            if status_str == "Track":
+                core.set_property("loop-file", "inf")
+                core.set_property("loop-playlist", "no")
+            elif status_str == "Playlist":
+                core.set_property("loop-file", "no")
+                core.set_property("loop-playlist", "inf")
+            else:
+                core.set_property("loop-file", "no")
+                core.set_property("loop-playlist", "no")
+            return True
         return False
 
     def _build_metadata_variant(self) -> GLib.Variant:
         core = getattr(self.win, "core", None)
         meta: Dict[str, GLib.Variant] = {}
-        meta["mpris:trackid"] = GLib.Variant("o", "/org/mpris/MediaPlayer2/CurrentTrack")
         
         if core and core.current_file:
-            dur_us = int(core.duration * 1000000)
+            meta["mpris:trackid"] = GLib.Variant("o", "/org/mpris/MediaPlayer2/CurrentTrack")
+            dur = core.duration
+            dur_us = int(dur * 1000000) if (math.isfinite(dur) and dur > 0) else 0
             meta["mpris:length"] = GLib.Variant("x", max(0, dur_us))
             title = core.current_title or os.path.basename(core.current_file)
             meta["xesam:title"] = GLib.Variant("s", title)
-            url = core.current_file if "://" in core.current_file else f"file://{os.path.abspath(core.current_file)}"
+            if "://" in core.current_file:
+                url = core.current_file
+            else:
+                url = Path(os.path.abspath(core.current_file)).as_uri()
             meta["xesam:url"] = GLib.Variant("s", url)
+        else:
+            meta["mpris:trackid"] = GLib.Variant("o", "/org/mpris/MediaPlayer2/TrackList/NoTrack")
 
         return GLib.Variant("a{sv}", meta)
 

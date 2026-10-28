@@ -9,6 +9,7 @@ gi.require_version('Gdk', '3.0')
 from gi.repository import Gtk, Gdk, Pango
 from typing import Dict, Any, Optional
 import os
+import math
 
 
 class MediaInfoDialog(Gtk.Window):
@@ -46,8 +47,9 @@ class MediaInfoDialog(Gtk.Window):
         self.text_view.set_left_margin(12)
         self.text_view.set_right_margin(12)
         self.text_view.set_top_margin(10)
-        self.text_view.set_bottom_margin(10)
-        self.text_view.override_font(Pango.FontDescription("Consolas, Monospace 10"))
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b"textview { font-family: 'Consolas', 'Monospace', monospace; font-size: 10pt; }")
+        self.text_view.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         self.text_buffer = self.text_view.get_buffer()
         scrolled.add(self.text_view)
@@ -83,24 +85,24 @@ class MediaInfoDialog(Gtk.Window):
         """
         Formats comprehensive playback report matching PotPlayer's Ctrl+F1 text dump.
         """
-        path = info.get("path", "No file loaded")
-        filesize = info.get("filesize_bytes", 0)
-        dur = info.get("duration_sec", 0.0)
-        w = info.get("width", 0)
-        h = info.get("height", 0)
-        fps = info.get("fps", 0.0)
-        v_codec = info.get("video_codec", "None")
-        pix_fmt = info.get("pixel_format", "Unknown")
-        colormatrix = info.get("colormatrix", "Unknown")
-        v_bitrate = info.get("video_bitrate", 0)
-        a_codec = info.get("audio_codec", "None")
-        a_channels = info.get("audio_channels", "Unknown")
-        sample_rate = info.get("sample_rate", 0)
-        a_bitrate = info.get("audio_bitrate", 0)
-        hwdec = info.get("hwdec", "no")
-        a_delay = info.get("audio_delay", 0.0)
-        sub_delay = info.get("sub_delay", 0.0)
-        tracks = info.get("tracks", [])
+        path = info.get("path") or "No file loaded"
+        filesize = info.get("filesize_bytes") or 0
+        dur = float(info.get("duration_sec") or 0.0)
+        w = int(info.get("width") or 0)
+        h = int(info.get("height") or 0)
+        fps = float(info.get("fps") or 0.0)
+        v_codec = info.get("video_codec") or "None"
+        pix_fmt = info.get("pixel_format") or "Unknown"
+        colormatrix = info.get("colormatrix") or "Unknown"
+        v_bitrate = int(info.get("video_bitrate") or 0)
+        a_codec = info.get("audio_codec") or "None"
+        a_channels = info.get("audio_channels") or "Unknown"
+        sample_rate = int(info.get("sample_rate") or 0)
+        a_bitrate = int(info.get("audio_bitrate") or 0)
+        hwdec = info.get("hwdec") or "no"
+        a_delay = float(info.get("audio_delay") or 0.0)
+        sub_delay = float(info.get("sub_delay") or 0.0)
+        tracks = info.get("tracks") or []
 
         # Format file size
         if filesize > 1024 * 1024 * 1024:
@@ -117,10 +119,17 @@ class MediaInfoDialog(Gtk.Window):
         dur_str = f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}.{int((dur-s)*1000):03d}"
 
         # Decoder string
-        if hwdec and hwdec != "no":
+        if isinstance(hwdec, str) and hwdec.lower() != "no":
             dec_str = f"Hardware Acceleration Active ({hwdec.upper()})"
         else:
             dec_str = "Software Decoding (libavcodec / dav1d)"
+
+        # Display Aspect Ratio
+        if w > 0 and h > 0:
+            g = math.gcd(w, h)
+            dar_str = f"{w // g}:{h // g}"
+        else:
+            dar_str = f"{w}:{h if h else 1}"
 
         lines = [
             "=" * 70,
@@ -128,14 +137,14 @@ class MediaInfoDialog(Gtk.Window):
             "=" * 70,
             "",
             "[General Information]",
-            f"  File Name        : {os.path.basename(path) if path else 'None'}",
+            f"  File Name        : {os.path.basename(path) if path and path != 'No file loaded' else 'None'}",
             f"  Full Path        : {path}",
             f"  File Size        : {size_str}",
             f"  Duration         : {dur_str} ({dur:.2f} seconds)",
             "",
             "[Video Information]",
             f"  Video Codec      : {v_codec}",
-            f"  Resolution       : {w} x {h} (Display Aspect Ratio: {w}:{h if h else 1})",
+            f"  Resolution       : {w} x {h} (Display Aspect Ratio: {dar_str})",
             f"  Frame Rate       : {fps:.3f} fps",
             f"  Pixel Format     : {pix_fmt}",
             f"  Color Matrix     : {colormatrix}",

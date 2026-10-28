@@ -37,7 +37,7 @@ class PotContextMenu:
         self._add_action(open_menu, "Open URL... \tCtrl+U", "CMD_OPEN_URL")
         self._add_action(open_menu, "Open Folder... \tF2", "CMD_OPEN_FOLDER")
         self._add_separator(open_menu)
-        self._add_action(open_menu, "Open Screen Capture \tCtrl+S", "CMD_OPEN_SCREEN_CAPTURE")
+        self._add_action(open_menu, "Open Screen Capture", "CMD_OPEN_SCREEN_CAPTURE")
         self._add_action(open_menu, "Open Webcam / Device \tCtrl+J", "CMD_OPEN_WEBCAM")
         open_item.set_submenu(open_menu)
         self.menu.append(open_item)
@@ -131,6 +131,21 @@ class PotContextMenu:
 
         self._add_action(audio_menu, "Cycle Audio Track \tA", "CMD_CYCLE_AUDIO_TRACK")
         self._add_action(audio_menu, "Toggle Mute \tM", "CMD_AUDIO_MUTE")
+        self._add_separator(audio_menu)
+        self._add_action(audio_menu, "Audio Enhancement (Loudness) \tShift+E", "CMD_AUDIO_ENHANCE_TOGGLE")
+        
+        # Audio Enhancement Presets Submenu
+        enh_item = Gtk.MenuItem(label="Enhancement Presets")
+        enh_menu = Gtk.Menu()
+        self._add_action(enh_menu, "Off (Bit-Perfect)", "CMD_AUDIO_ENHANCE_PRESET_Off")
+        self._add_action(enh_menu, "Gentle / Low (+3 dB)", "CMD_AUDIO_ENHANCE_PRESET_Gentle_/_Low")
+        self._add_action(enh_menu, "Balanced / Default (+5 dB)", "CMD_AUDIO_ENHANCE_PRESET_Balanced_/_Default")
+        self._add_action(enh_menu, "Dialogue Focus (+5.5 dB)", "CMD_AUDIO_ENHANCE_PRESET_Dialogue_Focus")
+        self._add_action(enh_menu, "Dynamic / High (+7.5 dB)", "CMD_AUDIO_ENHANCE_PRESET_Dynamic_/_High")
+        enh_item.set_submenu(enh_menu)
+        audio_menu.append(enh_item)
+
+        self._add_separator(audio_menu)
         self._add_action(audio_menu, "Audio Normalizer \tShift+N", "CMD_AUDIO_NORMALIZER_TOGGLE")
         self._add_action(audio_menu, "Volume Boost PreAmp (+1 dB) \tShift+Up", "CMD_AUDIO_BOOST_UP")
         self._add_action(audio_menu, "Volume Boost PreAmp (-1 dB) \tShift+Down", "CMD_AUDIO_BOOST_DOWN")
@@ -174,7 +189,7 @@ class PotContextMenu:
         self._add_action(sub_menu, "Reset Sync \tAlt+/", "CMD_SUB_SYNC_RESET")
         self._add_separator(sub_menu)
         self._add_action(sub_menu, "Real-Time AI Subtitle Translation", "CMD_SUB_TRANSLATE_TOGGLE")
-        self._add_action(sub_menu, "Search Subtitles Online...", "CMD_SUB_ONLINE_SEARCH")
+        self._add_action(sub_menu, "Search Subtitles Online... \tCtrl+Alt+S", "CMD_SUB_ONLINE_SEARCH")
         sub_item.set_submenu(sub_menu)
         self.menu.append(sub_item)
 
@@ -185,7 +200,7 @@ class PotContextMenu:
         self._add_action(cap_menu, "Save Current Frame As... \tCtrl+E", "CMD_CAPTURE_FRAME_AS")
         self._add_action(cap_menu, "Copy Frame to Clipboard \tCtrl+C", "CMD_CAPTURE_TO_CLIPBOARD")
         self._add_separator(cap_menu)
-        self._add_action(cap_menu, "Create Storyboard Sheet \tCtrl+Alt+S", "CMD_CREATE_STORYBOARD")
+        self._add_action(cap_menu, "Create Storyboard Sheet", "CMD_CREATE_STORYBOARD")
         self._add_action(cap_menu, "Create Animated GIF \tCtrl+Alt+G", "CMD_CREATE_GIF")
         cap_item.set_submenu(cap_menu)
         self.menu.append(cap_item)
@@ -209,7 +224,7 @@ class PotContextMenu:
     def _build_aspect_ratio_items(self) -> None:
         modes = [
             ("Auto (Keep Aspect Ratio)", "-1"),
-            ("Stretch to Window / Screen \tCtrl+Enter", "no"),
+            ("Stretch to Window / Screen \tCtrl+Enter", "stretch"),
             ("16:9 Wide Preserved", "16:9"),
             ("4:3 Standard", "4:3"),
             ("2.35:1 CinemaScope", "2.35:1"),
@@ -217,7 +232,10 @@ class PotContextMenu:
         ]
         for label, val in modes:
             item = Gtk.MenuItem(label=label)
-            item.connect("activate", lambda w, m=val: self.dispatch("CMD_SET_ASPECT_RATIO", m))
+            if val == "stretch":
+                item.connect("activate", lambda w: self.dispatch("CMD_VIDEO_STRETCH", None))
+            else:
+                item.connect("activate", lambda w, m=val: self.dispatch("CMD_SET_ASPECT_RATIO", m))
             self.aspect_menu.append(item)
 
     def refresh_dynamic_menus(self, core: Any) -> None:
@@ -246,7 +264,7 @@ class PotContextMenu:
                 self.audio_streams_menu.append(item)
 
             self._add_separator(self.audio_streams_menu)
-            dis_prefix = "✓ " if cur_aid == "no" else "   "
+            dis_prefix = "✓ " if (not cur_aid or cur_aid == "no") else "   "
             dis_item = Gtk.MenuItem(label=f"{dis_prefix}Disable Audio")
             dis_item.connect("activate", lambda w: self.dispatch("CMD_SET_AUDIO_TRACK", "no"))
             self.audio_streams_menu.append(dis_item)
@@ -277,7 +295,7 @@ class PotContextMenu:
                 self.sub_streams_menu.append(item)
 
             self._add_separator(self.sub_streams_menu)
-            dis_prefix = "✓ " if cur_sid == "no" else "   "
+            dis_prefix = "✓ " if (not cur_sid or cur_sid == "no") else "   "
             dis_item = Gtk.MenuItem(label=f"{dis_prefix}Disable Subtitles")
             dis_item.connect("activate", lambda w: self.dispatch("CMD_SET_SUB_TRACK", "no"))
             self.sub_streams_menu.append(dis_item)
@@ -322,7 +340,15 @@ class PotContextMenu:
         sep = Gtk.SeparatorMenuItem()
         parent_menu.append(sep)
 
-    def popup(self, event, core: Optional[Any] = None) -> None:
+    def popup(self, event: Optional[Any] = None, core: Optional[Any] = None) -> None:
         if core is not None:
             self.refresh_dynamic_menus(core)
-        self.menu.popup(None, None, None, None, event.button, event.time)
+        if event is not None and hasattr(self.menu, "popup_at_pointer"):
+            try:
+                self.menu.popup_at_pointer(event)
+                return
+            except Exception:
+                pass
+        button = event.button if (event and hasattr(event, "button")) else 0
+        time_val = event.time if (event and hasattr(event, "time")) else Gtk.get_current_event_time()
+        self.menu.popup(None, None, None, None, button, time_val)

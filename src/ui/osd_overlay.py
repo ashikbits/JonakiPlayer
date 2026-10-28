@@ -54,20 +54,26 @@ class OSDOverlay:
             cr.save()
             cr.select_font_face("Segoe UI", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
             cr.set_font_size(24.0)
-            extents = cr.text_extents(self.translated_sub)
-            x = max(10, (window_width - extents.width) / 2)
-            y = max(40, window_height - 90)
+            sub_lines = [l for l in self.translated_sub.split("\n") if l.strip()]
+            line_height = 32.0
+            start_y = max(40, window_height - 90 - int((len(sub_lines) - 1) * line_height))
 
-            # High-contrast outline / shadow
-            cr.set_source_rgba(0.0, 0.0, 0.0, 0.9)
-            for dx, dy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-2, -2), (2, 2)]:
-                cr.move_to(x + dx, y + dy)
-                cr.show_text(self.translated_sub)
+            for i, line_text in enumerate(sub_lines):
+                extents = cr.text_extents(line_text)
+                x = max(10, (window_width - extents.width) / 2)
+                y = start_y + (i * line_height)
 
-            # Vibrant PotPlayer gold subtitle text
-            cr.set_source_rgb(1.0, 0.88, 0.25)
-            cr.move_to(x, y)
-            cr.show_text(self.translated_sub)
+                # High-contrast outline / shadow
+                cr.set_source_rgba(0.0, 0.0, 0.0, 0.9)
+                for dx, dy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-2, -2), (2, 2)]:
+                    cr.move_to(x + dx, y + dy)
+                    cr.show_text(line_text)
+
+                # Vibrant PotPlayer gold subtitle text
+                cr.set_source_rgb(1.0, 0.88, 0.25)
+                cr.move_to(x, y)
+                cr.show_text(line_text)
+
             cr.restore()
 
         # 3. Tab Technical Playback Info HUD
@@ -81,6 +87,9 @@ class OSDOverlay:
         # Semi-transparent dark background card
         card_w = min(560, width - 40)
         card_h = 320
+        cr.rectangle(20, 20, card_w, card_h)
+        cr.clip()
+
         cr.set_source_rgba(0.08, 0.08, 0.10, 0.85)
         cr.rectangle(20, 20, card_w, card_h)
         cr.fill()
@@ -108,13 +117,21 @@ class OSDOverlay:
         cr.select_font_face("Consolas", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(11.0)
 
+        file_str = str(info.get('file_path') or 'No file loaded')
+        if len(file_str) > 55:
+            file_str = "..." + file_str[-52:]
+
+        fps_val = float(info.get('fps') or 0.0)
+        hwdec_val = info.get("hwdec")
+        dec_str = f"HW: {hwdec_val.upper()}" if isinstance(hwdec_val, str) and hwdec_val.lower() != 'no' else 'SW: FFmpeg'
+
         lines = [
-            f"File:         {info.get('file_path', 'No file loaded')}",
+            f"File:         {file_str}",
             f"Playback:     {self._format_hms(pos)} / {self._format_hms(dur)} ({(pos/dur*100) if dur > 0 else 0:.1f}%)",
             f"Video Codec:  {info.get('video_codec', 'None')} ({info.get('pixel_format', 'YUV420P')})",
             f"Resolution:   {info.get('width', 1920)} x {info.get('height', 1080)} (Aspect: {info.get('aspect', '16:9')})",
-            f"FPS:          {info.get('fps', 60.0):.2f} fps",
-            f"Decoder:      [{'HW: ' + info.get('hwdec', 'VAAPI').upper() if info.get('hwdec') != 'no' else 'SW: FFmpeg'}]",
+            f"FPS:          {fps_val:.2f} fps",
+            f"Decoder:      [{dec_str}]",
             f"Audio Codec:  {info.get('audio_codec', 'AAC')} ({info.get('audio_channels', 2)} Channels)",
             f"Sample Rate:  {info.get('sample_rate', 48000)} Hz",
             f"Output Sink:  PipeWire / PulseAudio Low-Latency Sink",

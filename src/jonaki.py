@@ -9,14 +9,15 @@ Supports /filedlg, /seek=, /sub=, /aud=, /user_agent=, /new, /current, and stdin
 import os
 import sys
 
-# Guarantee X11 surface embedding under Wayland / XWayland when executed directly
-os.environ.pop("WAYLAND_DISPLAY", None)
-if __name__ == "__main__" and os.environ.get("GDK_BACKEND") != "x11":
-    os.environ["GDK_BACKEND"] = "x11"
-    try:
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-    except Exception:
-        pass
+def ensure_x11_backend() -> None:
+    # Guarantee X11 surface embedding under Wayland / XWayland
+    if os.environ.get("GDK_BACKEND") != "x11":
+        os.environ["GDK_BACKEND"] = "x11"
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception as e:
+            print(f"[Jonaki] Warning: Failed to re-exec with GDK_BACKEND=x11: {e}", file=sys.stderr)
+
 
 if not os.environ.get("VDPAU_DRIVER"):
     if os.path.exists("/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_radeonsi.so"):
@@ -38,7 +39,6 @@ import subprocess
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
-Gtk.init(None)
 
 try:
     _libc.setlocale(1, b"C")
@@ -55,20 +55,23 @@ from ui.main_window import JonakiMainWindow, PotPlayerMainWindow
 def parse_seek_time(seek_str: str) -> float:
     """
     Parses hh:mm:ss.ms or integer seconds string into float seconds.
+    Returns 0.0 on malformed input or negative values.
     """
+    if not seek_str:
+        return 0.0
     seek_str = seek_str.strip().strip('"').strip("'")
     if ":" in seek_str:
         parts = seek_str.split(":")
         try:
             if len(parts) == 3:
-                return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+                return max(0.0, float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2]))
             elif len(parts) == 2:
-                return float(parts[0]) * 60 + float(parts[1])
-        except ValueError:
-            pass
+                return max(0.0, float(parts[0]) * 60 + float(parts[1]))
+        except (ValueError, TypeError):
+            return 0.0
     try:
-        return float(seek_str)
-    except ValueError:
+        return max(0.0, float(seek_str))
+    except (ValueError, TypeError):
         return 0.0
 
 
@@ -202,6 +205,17 @@ def parse_arguments(argv: list) -> dict:
                     pass
             elif sw.startswith("config="):
                 options["config"] = clean.split("=", 1)[1].strip('"').strip("'")
+            elif clean.startswith("/") and ("/" not in clean[1:] or "=" in clean):
+                if "." in os.path.basename(clean) and "=" not in clean:
+                    matches = glob.glob(clean)
+                    if matches:
+                        options["contents"].extend(matches)
+                    else:
+                        options["contents"].append(clean)
+                else:
+                    print(f"[Jonaki] Warning: Unrecognized switch '{clean}'", file=sys.stderr)
+            elif lower.startswith("-"):
+                print(f"[Jonaki] Warning: Unrecognized switch '{clean}'", file=sys.stderr)
             else:
                 # Absolute path or glob that doesn't exist on disk yet
                 matches = glob.glob(clean)
@@ -221,6 +235,8 @@ def parse_arguments(argv: list) -> dict:
 
 
 def main():
+    ensure_x11_backend()
+    Gtk.init_check(None)
     options = parse_arguments(sys.argv)
 
     # Handle single instance /current unless /new was specified
@@ -247,20 +263,22 @@ def main():
     if options["volume"] is not None:
         win.core.set_volume(options["volume"])
 
-    if options["sub"]:
-        win.core.load_subtitle(options["sub"])
-
-    if options["aud"]:
-        win.core.load_audio_track(options["aud"])
-
     # Show Window and Realize GTK surface first
     win.show_all()
 
     if options["contents"]:
-        win.add_files_to_playlist(options["contents"], auto_play=True)
-
-    if options["seek"] > 0:
-        GLib.timeout_add(150, lambda: win.core.seek_absolute(options["seek"]) and False)
+        win.add_files_to_playlist(
+            options["contents"],
+            auto_play=True,
+            seek_pts=options["seek"],
+            sub_file=options["sub"],
+            audio_file=options["aud"]
+        )
+    else:
+        if options["sub"]:
+            win.core.load_subtitle(options["sub"])
+        if options["aud"]:
+            win.core.load_audio_track(options["aud"])
 
     # Launch IPC Server for receiving secondary instance requests
     def _ipc_handler(msg: dict) -> dict:
@@ -268,11 +286,19 @@ def main():
         if cmd == "open":
             items = msg.get("items", [])
             add_mode = msg.get("add", False)
+            seek_val = msg.get("seek", 0.0)
+            sub_val = msg.get("sub")
+            aud_val = msg.get("aud")
             if items:
                 # not add_mode means clear existing and play immediately
-                GLib.idle_add(win.add_files_to_playlist, items, True, not add_mode)
-            if msg.get("seek", 0) > 0:
-                GLib.idle_add(win.core.seek_absolute, msg["seek"])
+                GLib.idle_add(win.add_files_to_playlist, items, True, not add_mode, seek_val, sub_val, aud_val)
+            else:
+                if sub_val:
+                    GLib.idle_add(win.core.load_subtitle, sub_val)
+                if aud_val:
+                    GLib.idle_add(win.core.load_audio_track, aud_val)
+                if seek_val > 0:
+                    GLib.idle_add(win.core.seek_absolute, seek_val)
             return {"status": "ok"}
         return {"status": "unrecognized_command"}
 
@@ -281,6 +307,8 @@ def main():
 
     if options["filedlg"]:
         win.handle_command("CMD_OPEN_FILE")
+    elif options["folderdlg"]:
+        win.handle_command("CMD_OPEN_FOLDER")
     elif options["urldlg"]:
         win.handle_command("CMD_OPEN_URL")
     elif options.get("clipboard"):

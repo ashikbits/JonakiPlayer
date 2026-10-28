@@ -34,9 +34,19 @@ class SubtitleManager:
         # Translation
         self.translation_enabled: bool = False
         self.target_language: str = "en"
+        self.tracks: List[SubtitleTrack] = []
+
+    def set_tracks(self, tracks: List[SubtitleTrack]) -> None:
+        self.tracks = tracks
+
+    def get_track(self, track_id: int) -> Optional[SubtitleTrack]:
+        for t in self.tracks:
+            if t.track_id == track_id:
+                return t
+        return None
 
     def adjust_sync(self, delta_sec: float) -> float:
-        self.sync_offset_sec += delta_sec
+        self.sync_offset_sec = round(self.sync_offset_sec + delta_sec, 3)
         return self.sync_offset_sec
 
     def reset_sync(self) -> None:

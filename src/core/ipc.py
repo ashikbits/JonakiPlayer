@@ -6,8 +6,16 @@ Unix Domain Socket Server & Client for command delegation (/new, /current, /add,
 import os
 import json
 import socket
+import struct
 import threading
+import time
 from typing import Callable, Optional, Dict, Any
+
+
+import fcntl
+import gi
+gi.require_version('GLib', '2.0')
+from gi.repository import GLib
 
 
 def get_default_ipc_socket_path() -> str:
@@ -15,8 +23,46 @@ def get_default_ipc_socket_path() -> str:
     if not runtime_dir or not os.path.isdir(runtime_dir):
         uid = os.getuid()
         runtime_dir = f"/tmp/jonaki_{uid}"
-        os.makedirs(runtime_dir, exist_ok=True)
+        os.makedirs(runtime_dir, mode=0o700, exist_ok=True)
+        try:
+            stat_info = os.stat(runtime_dir)
+            if stat_info.st_uid != uid or (stat_info.st_mode & 0o777) != 0o700:
+                os.chmod(runtime_dir, 0o700)
+        except Exception:
+            pass
     return os.path.join(runtime_dir, "jonaki_ipc.sock")
+
+
+def _send_msg(sock: socket.socket, data: bytes) -> None:
+    sock.sendall(struct.pack(">I", len(data)) + data)
+
+
+def _recv_all(sock: socket.socket, n: int) -> Optional[bytes]:
+    data = bytearray()
+    while len(data) < n:
+        packet = sock.recv(min(n - len(data), 65536))
+        if not packet:
+            return None
+        data.extend(packet)
+    return bytes(data)
+
+
+def _recv_msg(sock: socket.socket) -> Optional[bytes]:
+    header = _recv_all(sock, 4)
+    if not header:
+        return None
+    if header.startswith(b"{") or header.startswith(b"["):
+        chunks = [header]
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    (length,) = struct.unpack(">I", header)
+    if length > 32 * 1024 * 1024:
+        return None
+    return _recv_all(sock, length)
 
 
 class IPCServer:
@@ -26,6 +72,8 @@ class IPCServer:
     """
     def __init__(self, command_handler: Callable[[Dict[str, Any]], Dict[str, Any]], socket_path: Optional[str] = None):
         self.socket_path = socket_path or get_default_ipc_socket_path()
+        self.lock_path = self.socket_path + ".lock"
+        self._lock_file: Optional[Any] = None
         self.command_handler = command_handler
         self._server_socket: Optional[socket.socket] = None
         self._is_running = False
@@ -33,14 +81,28 @@ class IPCServer:
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> bool:
+        # Acquire advisory file lock to eliminate TOCTOU races between concurrent instances
+        try:
+            self._lock_file = open(self.lock_path, "w")
+            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            if self._lock_file:
+                try:
+                    self._lock_file.close()
+                except Exception:
+                    pass
+                self._lock_file = None
+            return False
+
         # Check if already bound
         if os.path.exists(self.socket_path):
             try:
                 # Test connection
-                test_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                test_sock.connect(self.socket_path)
-                test_sock.close()
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as test_sock:
+                    test_sock.settimeout(0.5)
+                    test_sock.connect(self.socket_path)
                 # Server is already alive!
+                self._release_lock()
                 return False
             except (socket.error, OSError):
                 # Stale socket file
@@ -52,15 +114,34 @@ class IPCServer:
         try:
             self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._server_socket.bind(self.socket_path)
+            try:
+                os.chmod(self.socket_path, 0o600)
+            except Exception:
+                pass
             self._owns_socket = True
-            self._server_socket.listen(10)
+            self._server_socket.listen(128)
             self._is_running = True
             self._thread = threading.Thread(target=self._listen_loop, daemon=True, name="IPCServer")
             self._thread.start()
             return True
         except Exception as e:
             print(f"[IPCServer] Failed to bind to {self.socket_path}: {e}")
+            self._release_lock()
             return False
+
+    def _release_lock(self) -> None:
+        if self._lock_file:
+            try:
+                fcntl.flock(self._lock_file, fcntl.LOCK_UN)
+                self._lock_file.close()
+            except Exception:
+                pass
+            self._lock_file = None
+        if os.path.exists(self.lock_path):
+            try:
+                os.unlink(self.lock_path)
+            except OSError:
+                pass
 
     def _listen_loop(self) -> None:
         while self._is_running and self._server_socket:
@@ -71,17 +152,45 @@ class IPCServer:
                 break
 
     def _handle_client(self, client_sock: socket.socket) -> None:
+        client_sock.settimeout(5.0)
         with client_sock:
             try:
-                data = client_sock.recv(65536)
-                if not data:
+                data = _recv_msg(client_sock)
+                if data is None:
+                    return
+                if len(data) == 0:
+                    _send_msg(client_sock, json.dumps({"status": "error", "message": "Empty payload"}).encode("utf-8"))
                     return
                 message = json.loads(data.decode("utf-8"))
-                response = self.command_handler(message)
-                client_sock.sendall(json.dumps(response).encode("utf-8"))
+
+                # Thread safety: Dispatch UI commands to the GTK main loop if it is active
+                if GLib.main_depth() > 0:
+                    done_event = threading.Event()
+                    result_container = {}
+
+                    def _run_handler():
+                        try:
+                            result_container["res"] = self.command_handler(message)
+                        except Exception as err:
+                            result_container["err"] = err
+                        finally:
+                            done_event.set()
+                        return False
+
+                    GLib.idle_add(_run_handler)
+                    if done_event.wait(timeout=5.0):
+                        if "err" in result_container:
+                            raise result_container["err"]
+                        response = result_container.get("res", {"status": "ok"})
+                    else:
+                        response = {"status": "error", "message": "Command execution timed out"}
+                else:
+                    response = self.command_handler(message)
+
+                _send_msg(client_sock, json.dumps(response).encode("utf-8"))
             except Exception as e:
                 try:
-                    client_sock.sendall(json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
+                    _send_msg(client_sock, json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
                 except OSError:
                     pass
 
@@ -99,6 +208,7 @@ class IPCServer:
             except OSError:
                 pass
             self._owns_socket = False
+        self._release_lock()
 
 
 class IPCClient:
@@ -112,25 +222,32 @@ class IPCClient:
         if not os.path.exists(self.socket_path):
             return False
         try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.settimeout(0.5)
-            s.connect(self.socket_path)
-            s.close()
-            return True
-        except (socket.error, OSError):
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                s.connect(self.socket_path)
+                return True
+        except Exception:
             return False
 
     def send_command(self, payload: Dict[str, Any], timeout: float = 2.0) -> Optional[Dict[str, Any]]:
-        try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.settimeout(timeout)
-            s.connect(self.socket_path)
-            s.sendall(json.dumps(payload).encode("utf-8"))
-            raw = s.recv(65536)
-            s.close()
-            if raw:
-                return json.loads(raw.decode("utf-8"))
-            return None
-        except Exception as e:
-            print(f"[IPCClient] Command send failed: {e}")
-            return None
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                    s.settimeout(timeout)
+                    s.connect(self.socket_path)
+                    _send_msg(s, json.dumps(payload).encode("utf-8"))
+                    raw = _recv_msg(s)
+                    if raw:
+                        return json.loads(raw.decode("utf-8"))
+                    return None
+            except (socket.error, OSError) as e:
+                if time.time() + 0.05 < end_time:
+                    time.sleep(0.02)
+                    continue
+                print(f"[IPCClient] Command send failed: {e}")
+                return None
+            except Exception as e:
+                print(f"[IPCClient] Command send failed: {e}")
+                return None
+        return None

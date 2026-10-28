@@ -7,6 +7,7 @@ the pixel-accurate user interface inspired by PotPlayer.
 import os
 import zipfile
 import io
+import math
 from typing import Dict, List, Optional, Tuple, Any
 import cairo
 
@@ -111,6 +112,7 @@ class PotSkinEngine:
         self.volume_slider: Optional[SkinSlider] = None
         self.badges: List[SkinButton] = []
 
+        self._init_default_controls()
         self._load_dsf()
 
     def _load_dsf(self) -> None:
@@ -130,8 +132,6 @@ class PotSkinEngine:
                             print(f"[PotSkinEngine] Error loading {filename}: {e}")
         except Exception as e:
             print(f"[PotSkinEngine] Failed to open DSF archive: {e}")
-
-        self._init_default_controls()
 
     def _init_default_controls(self) -> None:
         """
@@ -153,6 +153,7 @@ class PotSkinEngine:
         self.btn_stream = SkinButton("CMD_POPUPMENU_STREAM_SELECT", "Stream / Source Select", 23, 22, 202, 455, 23, 22, align="Right")
         self.btn_playlist = SkinButton("ID_PLAYLIST_WINDOW", "Playlist (F8 / F12)", 23, 22, 202, 391, 23, 22, align="Right")
         self.btn_control_box = SkinButton("ID_CONTROL_BOX_WINDOW", "Control Box (F6)", 23, 22, 303, 391, 23, 22, align="Right")
+        self.btn_fullscreen = SkinButton("CMD_FULLSCREEN", "Fullscreen (Enter)", 23, 22, 101, 391, 23, 22, align="Right")
 
         self.buttons = [
             self.btn_play,
@@ -164,7 +165,8 @@ class PotSkinEngine:
             self.btn_mute,
             self.btn_stream,
             self.btn_playlist,
-            self.btn_control_box
+            self.btn_control_box,
+            self.btn_fullscreen
         ]
 
         # Timebar seek slider (Upper strip: 10px height, 3-slice track & thumb)
@@ -235,7 +237,7 @@ class PotSkinEngine:
             cr.save()
             cr.rectangle(dx + dw - crm, dy, crm, dh)
             cr.clip()
-            cr.set_source_surface(surf, (dx + dw - crm) - (sx + sw - rm), dy - sy)
+            cr.set_source_surface(surf, (dx + dw) - (sx + sw), dy - sy)
             cr.paint()
             cr.restore()
 
@@ -252,7 +254,7 @@ class PotSkinEngine:
             cr.paint()
             cr.restore()
 
-    def layout(self, panel_width: int, panel_height: int = 62) -> None:
+    def layout(self, panel_width: int, panel_height: int = 62, is_playing: bool = False) -> None:
         """
         Computes coordinate bounds for all widgets across the panel dimensions.
         Total height is partitioned into 22px upper strip (timebar & volume) and
@@ -293,7 +295,7 @@ class PotSkinEngine:
 
         # --- 3. Lower Strip: Tool Buttons (Right) ---
         rx = panel_width - 10
-        for btn in [self.btn_control_box, self.btn_playlist, self.btn_stream]:
+        for btn in [self.btn_fullscreen, self.btn_control_box, self.btn_playlist, self.btn_stream]:
             rx -= btn.width
             btn.rect = (rx, lower_y + (lower_h - btn.height) // 2, btn.width, btn.height)
             rx -= 6
@@ -321,10 +323,18 @@ class PotSkinEngine:
         """
         Renders the complete PotPlayer control bar surface using authentic DSF sprites.
         """
-        self.layout(panel_width, panel_height)
+        self.layout(panel_width, panel_height, is_playing=is_playing)
         main_surf = self.surfaces.get("Main.png")
         if not main_surf:
             return
+
+        if position_sec is None or math.isnan(position_sec) or math.isinf(position_sec):
+            position_sec = 0.0
+        position_sec = max(0.0, position_sec)
+
+        if duration_sec is None or math.isnan(duration_sec) or math.isinf(duration_sec):
+            duration_sec = 0.0
+        duration_sec = max(0.0, duration_sec)
 
         upper_h = 22
         lower_y = upper_h
@@ -352,7 +362,7 @@ class PotSkinEngine:
 
             # A-B Repeat Loop segment markers
             if repeat_a is not None and duration_sec > 0:
-                ax = tx + int((repeat_a / duration_sec) * tw)
+                ax = max(tx, min(tx + tw - 6, tx + int((repeat_a / duration_sec) * tw)))
                 cr.save()
                 cr.rectangle(ax, ty, 6, 10)
                 cr.clip()
@@ -361,7 +371,7 @@ class PotSkinEngine:
                 cr.restore()
 
             if repeat_b is not None and duration_sec > 0:
-                bx = tx + int((repeat_b / duration_sec) * tw)
+                bx = max(tx, min(tx + tw - 6, tx + int((repeat_b / duration_sec) * tw)))
                 cr.save()
                 cr.rectangle(bx, ty, 6, 10)
                 cr.clip()
@@ -372,7 +382,7 @@ class PotSkinEngine:
             # Bookmarks pins (PotPlayer authentic gold markers)
             if bookmarks and duration_sec > 0:
                 for bm_pts in bookmarks:
-                    bm_x = tx + int((bm_pts / duration_sec) * tw)
+                    bm_x = max(tx, min(tx + tw, tx + int((bm_pts / duration_sec) * tw)))
                     cr.save()
                     # Subtle dark outline / drop shadow
                     cr.set_source_rgba(0.0, 0.0, 0.0, 0.85)
@@ -543,8 +553,8 @@ class PotSkinEngine:
             cr.move_to(tx, ty)
             cr.show_text(text)
 
-        # 7. Lower Strip: Right Tool Buttons (Control Box, Playlist, Stream)
-        for btn in [self.btn_stream, self.btn_playlist, self.btn_control_box]:
+        # 7. Lower Strip: Right Tool Buttons (Fullscreen, Control Box, Playlist, Stream)
+        for btn in [self.btn_fullscreen, self.btn_stream, self.btn_playlist, self.btn_control_box]:
             bx, by, bw, bh = btn.rect
             if bx < 0:
                 continue
@@ -557,7 +567,9 @@ class PotSkinEngine:
             cr.paint()
             cr.restore()
 
-    def _format_time(self, seconds: float) -> str:
+    def _format_time(self, seconds: Optional[float]) -> str:
+        if seconds is None or math.isnan(seconds) or math.isinf(seconds):
+            seconds = 0.0
         s = int(max(0.0, seconds))
         hrs = s // 3600
         mins = (s % 3600) // 60
@@ -566,10 +578,11 @@ class PotSkinEngine:
             return f"{hrs:02d}:{mins:02d}:{secs:02d}"
         return f"{mins:02d}:{secs:02d}"
 
-    def hit_test(self, x: int, y: int) -> Optional[Any]:
+    def hit_test(self, x: int, y: int, is_playing: bool = False) -> Optional[Any]:
         """
         Returns button or slider element under cursor coordinates.
         Prioritizes sliders with expanded vertical hit-box, then buttons, then badges.
+        Respects playback state so play/pause overlapping buttons are correctly distinguished.
         """
         # Timebar slider hit-test with padding
         if self.timebar:
@@ -583,13 +596,12 @@ class PotSkinEngine:
             if vx <= x <= vx + vw and vy - 3 <= y <= vy + vh + 4:
                 return self.volume_slider
 
-        # Mute button
-        mx, my, mw, mh = self.btn_mute.rect
-        if mx <= x <= mx + mw and my <= y <= my + mh:
-            return self.btn_mute
-
-        # Transport & Right buttons
+        # Transport & Right buttons (includes btn_mute in self.buttons)
         for btn in self.buttons:
+            if btn == self.btn_play and is_playing:
+                continue
+            if btn == self.btn_pause and not is_playing:
+                continue
             bx, by, bw, bh = btn.rect
             if bx <= x <= bx + bw and by <= y <= by + bh:
                 return btn

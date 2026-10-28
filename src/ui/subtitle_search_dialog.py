@@ -47,6 +47,10 @@ class SubtitleSearchDialog(Gtk.Dialog):
         self.on_subtitle_downloaded = on_subtitle_downloaded
         self.client = SubtitleSearchClient()
         self._is_searching = False
+        self._is_destroyed = False
+
+        self.connect("destroy", self._on_destroy)
+        self.connect("response", self._on_response)
 
         self._setup_ui()
         self._apply_styling()
@@ -201,8 +205,7 @@ class SubtitleSearchDialog(Gtk.Dialog):
         """
         style_provider = Gtk.CssProvider()
         style_provider.load_from_data(css)
-        Gtk.StyleContext.add_provider_for_screen(
-            self.get_screen(),
+        self.get_style_context().add_provider(
             style_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
@@ -247,7 +250,16 @@ class SubtitleSearchDialog(Gtk.Dialog):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _on_destroy(self, widget: Any) -> None:
+        self._is_destroyed = True
+
+    def _on_response(self, dialog: Any, response_id: int) -> None:
+        if response_id in (Gtk.ResponseType.CANCEL, Gtk.ResponseType.DELETE_EVENT):
+            self.destroy()
+
     def _on_search_finished(self, results: list, err_msg: str) -> None:
+        if getattr(self, "_is_destroyed", False):
+            return False
         self._is_searching = False
         self.spinner.stop()
         self.search_btn.set_sensitive(True)
@@ -304,6 +316,8 @@ class SubtitleSearchDialog(Gtk.Dialog):
         threading.Thread(target=_download_worker, daemon=True).start()
 
     def _on_download_finished(self, success: bool, dest_path: str, title: str) -> None:
+        if getattr(self, "_is_destroyed", False):
+            return False
         self.spinner.stop()
         self.download_btn.set_sensitive(True)
         if success and os.path.exists(dest_path):

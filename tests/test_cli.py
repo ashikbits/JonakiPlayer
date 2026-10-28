@@ -21,6 +21,11 @@ class TestJonakiCLI(unittest.TestCase):
         # hh:mm:ss.ms
         self.assertEqual(parse_seek_time("01:02:03"), 3723.0)
         self.assertAlmostEqual(parse_seek_time("00:01:05.500"), 65.5)
+        # Negative, empty, or malformed tokens must return 0.0
+        self.assertEqual(parse_seek_time("-10"), 0.0)
+        self.assertEqual(parse_seek_time(""), 0.0)
+        self.assertEqual(parse_seek_time("invalid_token"), 0.0)
+        self.assertEqual(parse_seek_time("00:invalid:10"), 0.0)
 
     def test_basic_switches(self):
         args = ["jonaki", "movie.mkv", "/filedlg", "/autoplay", "/new", "/volume=75"]
@@ -40,11 +45,13 @@ class TestJonakiCLI(unittest.TestCase):
         self.assertEqual(opts["seek"], 600.0)
 
     def test_network_and_headers_switches(self):
-        args = ["jonaki", "https://stream.m3u8", '/user_agent="MyPlayer"', '/referer="https://site.com"']
+        # BUG 1.2: Assert /headers switch alongside /user_agent and /referer
+        args = ["jonaki", "https://stream.m3u8", '/user_agent="MyPlayer"', '/referer="https://site.com"', '/headers="X-Auth: 123"']
         opts = parse_arguments(args)
         self.assertEqual(opts["contents"], ["https://stream.m3u8"])
         self.assertEqual(opts["user_agent"], "MyPlayer")
         self.assertEqual(opts["referer"], "https://site.com")
+        self.assertEqual(opts["headers"], "X-Auth: 123")
 
     def test_stdin_streaming_switch(self):
         args = ["jonaki", "-"]
@@ -53,17 +60,60 @@ class TestJonakiCLI(unittest.TestCase):
         self.assertIn("fd://0", opts["contents"])
 
     def test_absolute_linux_paths(self):
-        args = ["jonaki", "/home/ashik/movie.mkv", "/volume=80", "/seek=00:01:00"]
+        dummy_path = "/tmp/nonexistent_test_movie_12345.mkv"
+        args = ["jonaki", dummy_path, "/volume=80", "/seek=00:01:00"]
         opts = parse_arguments(args)
-        self.assertIn("/home/ashik/movie.mkv", opts["contents"])
+        self.assertIn(dummy_path, opts["contents"])
         self.assertEqual(opts["volume"], 80.0)
         self.assertEqual(opts["seek"], 60.0)
 
-    def test_volume_clamp(self):
+    def test_volume_clamp_and_invalid(self):
         opts1 = parse_arguments(["jonaki", "/volume=150"])
         self.assertEqual(opts1["volume"], 100.0)
         opts2 = parse_arguments(["jonaki", "/volume=-20"])
         self.assertEqual(opts2["volume"], 0.0)
+        # BUG 1.4: Non-numeric volume should be ignored without raising exception
+        opts3 = parse_arguments(["jonaki", "/volume=invalid"])
+        self.assertIsNone(opts3["volume"])
+
+    def test_additional_cli_switches(self):
+        # BUG 1.4: Comprehensive coverage for all supported PotPlayer CLI switches
+        args = [
+            "jonaki",
+            "/urldlg",
+            "/folderdlg",
+            "/simple",
+            "/cap",
+            "/cam",
+            "/dvd",
+            "/cd:1",
+            "/add",
+            "/insert",
+            "/same",
+            "/sort",
+            "/randomize",
+            "/current",
+            "/clipboard",
+            '/title="Custom Title"',
+            '/config="Cinema"'
+        ]
+        opts = parse_arguments(args)
+        self.assertTrue(opts["urldlg"])
+        self.assertTrue(opts["folderdlg"])
+        self.assertTrue(opts["simple"])
+        self.assertTrue(opts["cap"])
+        self.assertTrue(opts["cam"])
+        self.assertTrue(opts["dvd"])
+        self.assertEqual(opts["cd"], "1")
+        self.assertTrue(opts["add"])
+        self.assertTrue(opts["insert"])
+        self.assertTrue(opts["same"])
+        self.assertTrue(opts["sort"])
+        self.assertTrue(opts["randomize"])
+        self.assertTrue(opts["current"])
+        self.assertTrue(opts["clipboard"])
+        self.assertEqual(opts["title"], "Custom Title")
+        self.assertEqual(opts["config"], "Cinema")
 
 
 if __name__ == "__main__":

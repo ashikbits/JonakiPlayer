@@ -85,18 +85,22 @@ class PlaylistWindow(Gtk.Window):
         self.list_store.clear()
         total_sec = 0.0
         for i, item in enumerate(items):
-            title = item.get("title") or os.path.basename(item.get("path", ""))
+            item_path = item.get("path") or ""
+            title = item.get("title") or (os.path.basename(item_path) if item_path else "Unknown")
             dur = item.get("duration", 0.0)
             total_sec += dur
             dur_str = self._format_duration(dur)
-            self.list_store.append([i + 1, title, dur_str, item.get("path", "")])
+            self.list_store.append([i + 1, title, dur_str, item_path])
 
         self.lbl_summary.set_text(f"{len(items)} items | {self._format_duration(total_sec)}")
 
     def _format_duration(self, sec: float) -> str:
-        s = int(sec)
-        m = s // 60
+        s = int(max(0.0, sec))
+        h = s // 3600
+        m = (s % 3600) // 60
         s = s % 60
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
         return f"{m:02d}:{s:02d}"
 
     def _on_row_activated(self, tree_view, path, column):
@@ -125,6 +129,8 @@ class PlaylistWindow(Gtk.Window):
         if itr:
             idx = model.get_value(itr, 0) - 1
             self.player.remove_from_playlist(idx)
+            if self.search_entry.get_text().strip():
+                self._on_search_changed(self.search_entry)
 
     def _on_sort_clicked(self, widget):
         self.player.sort_playlist()
@@ -133,15 +139,22 @@ class PlaylistWindow(Gtk.Window):
         self.player.shuffle_playlist()
 
     def _on_search_changed(self, entry):
-        # Quick filter implementation
+        # Quick filter implementation preserving original playlist indices
         query = entry.get_text().lower().strip()
-        filtered = [item for item in self.player.playlist if query in (item.get("title") or "").lower() or query in item.get("path", "").lower()] if query else self.player.playlist
+        filtered = []
+        for orig_idx, item in enumerate(self.player.playlist):
+            title = (item.get("title") or "").lower()
+            path = (item.get("path") or "").lower()
+            if not query or ((query in title) or (query in path)):
+                filtered.append((orig_idx, item))
+
         self.list_store.clear()
         total_sec = 0.0
-        for i, item in enumerate(filtered):
-            title = item.get("title") or os.path.basename(item.get("path", ""))
+        for orig_idx, item in filtered:
+            item_path = item.get("path") or ""
+            title = item.get("title") or (os.path.basename(item_path) if item_path else "Unknown")
             dur = item.get("duration", 0.0)
             total_sec += dur
             dur_str = self._format_duration(dur)
-            self.list_store.append([i + 1, title, dur_str, item.get("path", "")])
+            self.list_store.append([orig_idx + 1, title, dur_str, item_path])
         self.lbl_summary.set_text(f"{len(filtered)} items | {self._format_duration(total_sec)}")

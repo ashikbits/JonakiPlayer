@@ -33,26 +33,41 @@ class VideoShaderManager:
         return sorted([f for f in files if f.endswith(".hook") or f.endswith(".glsl")])
 
     def enable_shader(self, shader_filename: str) -> bool:
-        full_path = os.path.join(self.shaders_dir, shader_filename)
-        if os.path.exists(full_path) and full_path not in self.active_shaders:
+        if not shader_filename or not shader_filename.strip():
+            return False
+        safe_name = os.path.basename(shader_filename)
+        if not safe_name:
+            return False
+        full_path = os.path.join(self.shaders_dir, safe_name)
+        if os.path.isfile(full_path) and full_path not in self.active_shaders:
             self.active_shaders.append(full_path)
             return True
         return False
 
     def disable_shader(self, shader_filename: str) -> bool:
-        full_path = os.path.join(self.shaders_dir, shader_filename)
+        if not shader_filename or not shader_filename.strip():
+            return False
+        safe_name = os.path.basename(shader_filename)
+        if not safe_name:
+            return False
+        full_path = os.path.join(self.shaders_dir, safe_name)
         if full_path in self.active_shaders:
             self.active_shaders.remove(full_path)
             return True
         return False
 
     def toggle_shader(self, shader_filename: str) -> bool:
-        full_path = os.path.join(self.shaders_dir, shader_filename)
+        if not shader_filename or not shader_filename.strip():
+            return False
+        safe_name = os.path.basename(shader_filename)
+        if not safe_name:
+            return False
+        full_path = os.path.join(self.shaders_dir, safe_name)
         if full_path in self.active_shaders:
             self.active_shaders.remove(full_path)
             return False
         else:
-            if os.path.exists(full_path):
+            if os.path.isfile(full_path):
                 self.active_shaders.append(full_path)
                 return True
             return False

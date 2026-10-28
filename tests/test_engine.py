@@ -3,6 +3,7 @@ Unit tests for JonakiCore packed in-process libmpv media engine.
 """
 
 import unittest
+import unittest.mock
 import sys
 import os
 
@@ -49,13 +50,27 @@ class TestJonakiCore(unittest.TestCase):
         self.assertEqual(self.core.saturation, -5.0)
 
     def test_ab_repeat_points(self):
+        # BUG 2.2: Test full A-B repeat loop logic including Point B validation and tick seeking
         self.core.position = 10.0
         self.core.set_repeat_point_a()
         self.assertEqual(self.core.repeat_a, 10.0)
 
+        # Setting Point B before/at Point A must be rejected
+        self.core.position = 5.0
+        res = self.core.set_repeat_point_b()
+        self.assertIsNone(res)
+        self.assertIsNone(self.core.repeat_b)
+
+        # Setting Point B after Point A succeeds
         self.core.position = 25.0
         self.core.set_repeat_point_b()
         self.assertEqual(self.core.repeat_b, 25.0)
+
+        # When position exceeds repeat_b, _query_time_tick seeks back to repeat_a
+        with unittest.mock.patch.object(self.core, "get_property_float", side_effect=lambda prop, default=0.0: 26.0 if prop == "time-pos" else default), \
+             unittest.mock.patch.object(self.core, "seek_absolute") as mock_seek:
+            self.core._query_time_tick()
+            mock_seek.assert_called_with(10.0)
 
         self.core.clear_repeat()
         self.assertIsNone(self.core.repeat_a)
@@ -172,15 +187,19 @@ class TestJonakiCore(unittest.TestCase):
         self.assertEqual(self.core.get_current_secondary_subtitle_track_id(), "no")
 
     def test_aspect_ratio_presets(self):
+        # BUG 2.3: Verify set_aspect_ratio_mode synchronizes aspect_ratio_mode cycle index
         self.core.set_aspect_ratio_mode("16:9")
+        self.assertEqual(self.core.aspect_ratio_mode, 2)
         val1 = float(self.core.get_property("video-aspect-override") or 0)
         self.assertAlmostEqual(val1, 16.0 / 9.0, places=3)
 
         self.core.set_aspect_ratio_mode("2.35:1")
+        self.assertEqual(self.core.aspect_ratio_mode, 4)
         val2 = float(self.core.get_property("video-aspect-override") or 0)
         self.assertAlmostEqual(val2, 2.35, places=2)
 
     def test_media_detailed_info_structure(self):
+        # BUG 2.1: Verify detailed info structure on both idle and active playback mock
         info = self.core.get_media_detailed_info()
         self.assertIsInstance(info, dict)
         self.assertIn("path", info)
@@ -188,6 +207,140 @@ class TestJonakiCore(unittest.TestCase):
         self.assertIn("video_codec", info)
         self.assertIn("audio_codec", info)
         self.assertIn("tracks", info)
+
+        # Active playback metadata resolution
+        self.core.current_file = "/media/test_movie.mkv"
+        self.core.current_title = "test_movie.mkv"
+        self.core.duration = 7200.0
+        self.core.video_width = 1920
+        self.core.video_height = 1080
+        self.core.video_codec = "HEVC"
+        self.core.audio_codec = "EAC3"
+
+        info_active = self.core.get_media_detailed_info()
+        self.assertEqual(info_active["path"], "/media/test_movie.mkv")
+        self.assertEqual(info_active["width"], 1920)
+        self.assertEqual(info_active["height"], 1080)
+        self.assertEqual(info_active["video_codec"], "HEVC")
+        self.assertEqual(info_active["audio_codec"], "EAC3")
+
+    def test_equalizer_bands_clamped(self):
+        self.core.set_equalizer_band(0, 20.0)
+        self.assertEqual(self.core.equalizer_bands[0], 12.0)
+        self.core.set_equalizer_band(0, -20.0)
+        self.assertEqual(self.core.equalizer_bands[0], -12.0)
+
+    def test_hwdec_toggle(self):
+        initial = self.core.hwdec_active
+        self.core.toggle_hwdec()
+        self.assertEqual(self.core.hwdec_active, "no")
+        self.core.toggle_hwdec()
+        self.assertEqual(self.core.hwdec_active, initial)
+
+    def test_video_fps_default(self):
+        self.assertEqual(self.core.video_fps, 0.0)
+
+    def test_ab_repeat_validation(self):
+        # BUG 1.2: Setting point A past point B invalidates point B to avoid infinite seek loop
+        self.core.position = 30.0
+        self.core.repeat_b = 20.0
+        self.core.set_repeat_point_a()
+        self.assertEqual(self.core.repeat_a, 30.0)
+        self.assertIsNone(self.core.repeat_b)
+
+    def test_stop_resets_metadata(self):
+        # BUG 1.17: stop() must reset current_file, duration, and video dimensions
+        self.core.current_file = "/media/test.mkv"
+        self.core.current_title = "test.mkv"
+        self.core.duration = 120.0
+        self.core.position = 45.0
+        self.core.video_width = 1920
+        self.core.video_height = 1080
+        self.core.stop()
+
+        self.assertIsNone(self.core.current_file)
+        self.assertIsNone(self.core.current_title)
+        self.assertEqual(self.core.duration, 0.0)
+        self.assertEqual(self.core.position, 0.0)
+        self.assertEqual(self.core.video_width, 0)
+        self.assertEqual(self.core.video_height, 0)
+        self.assertEqual(self.core.state, PlaybackState.STOPPED)
+
+    def test_flip_toggles_internal_state(self):
+        # BUG 1.14: Flip toggles maintain predictable internal state
+        self.assertFalse(self.core.is_horizontal_flip_active())
+        self.assertTrue(self.core.toggle_horizontal_flip())
+        self.assertTrue(self.core.is_horizontal_flip_active())
+        self.assertFalse(self.core.toggle_horizontal_flip())
+        self.assertFalse(self.core.is_horizontal_flip_active())
+
+    def test_eof_handling_under_keep_open(self):
+        # BUG 1.1: When eof is reached under keep-open=yes, core triggers on_file_end
+        self.core.current_file = "/media/test.mp4"
+        self.core.state = PlaybackState.PAUSED  # libmpv pauses at EOF when keep-open=yes
+        file_ended = []
+        self.core.on_file_end = lambda: file_ended.append(True)
+
+        with unittest.mock.patch.object(self.core, "get_property", side_effect=lambda k: "yes" if k == "eof-reached" else None):
+            self.core._query_time_tick()
+
+        self.assertEqual(file_ended, [True])
+        self.assertEqual(self.core.state, PlaybackState.STOPPED)
+
+    def test_playback_controls_and_callbacks(self):
+        # BUG 2.4: Test play, pause, play_pause, seek, audio/sub track commands, and callbacks
+        state_changes = []
+        time_updates = []
+        self.core.on_state_change = lambda st: state_changes.append(st)
+        self.core.on_time_update = lambda p, d: time_updates.append((p, d))
+
+        # Play / Pause / PlayPause
+        self.core.play()
+        self.assertEqual(self.core.state, PlaybackState.PLAYING)
+        self.assertIn(PlaybackState.PLAYING, state_changes)
+
+        self.core.pause()
+        self.assertEqual(self.core.state, PlaybackState.PAUSED)
+        self.assertIn(PlaybackState.PAUSED, state_changes)
+
+        self.core.play_pause()
+        self.assertEqual(self.core.state, PlaybackState.PLAYING)
+
+        self.core.play_pause()
+        self.assertEqual(self.core.state, PlaybackState.PAUSED)
+
+        # Seeking operations
+        with unittest.mock.patch.object(self.core, "command") as mock_cmd:
+            self.core.seek_relative(10.0)
+            mock_cmd.assert_called_with("seek 10.0 relative")
+
+            self.core.seek_absolute(120.0)
+            mock_cmd.assert_called_with("seek 120.0 absolute")
+
+            self.core.seek_percent(50.0)
+            mock_cmd.assert_called_with("seek 50.0 absolute-percent")
+
+            self.core.cycle_subtitle_track()
+            mock_cmd.assert_called_with("cycle sub")
+
+            self.core.cycle_audio_track()
+            mock_cmd.assert_called_with("cycle audio")
+
+        # Callbacks invocation via tick
+        with unittest.mock.patch.object(self.core, "get_property_float", side_effect=lambda prop, default=0.0: 15.0 if prop == "time-pos" else (100.0 if prop == "duration" else default)):
+            self.core._query_time_tick()
+        self.assertIn((15.0, 100.0), time_updates)
+
+        # Audio delay, HDR toggle, speed
+        self.core.set_audio_delay(0.15)
+        self.assertEqual(self.core.audio_delay_sec, 0.15)
+
+        self.assertFalse(self.core.hdr_active)
+        self.core.toggle_hdr()
+        self.assertTrue(self.core.hdr_active)
+
+        self.core.set_speed(1.5)
+        self.assertEqual(self.core.speed, 1.5)
 
 
 if __name__ == "__main__":

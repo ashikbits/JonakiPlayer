@@ -24,11 +24,16 @@ class TestPotSkinEngine(unittest.TestCase):
     def test_hit_testing(self):
         skin = PotSkinEngine()
         skin.layout(800, 62)
-        # Test hitting the play button
+        # Test hitting the play button when not playing
         play_btn = skin.btn_play
         bx, by, bw, bh = play_btn.rect
-        hit = skin.hit_test(bx + 5, by + 5)
+        hit = skin.hit_test(bx + 5, by + 5, is_playing=False)
         self.assertEqual(hit, play_btn)
+
+        # BUG 6.2: Test hitting the pause button when is_playing=True
+        pause_btn = skin.btn_pause
+        hit_pause = skin.hit_test(bx + 5, by + 5, is_playing=True)
+        self.assertEqual(hit_pause, pause_btn)
 
         # Test hitting the stop button
         stop_btn = skin.btn_stop
@@ -75,6 +80,8 @@ class TestPotSkinEngine(unittest.TestCase):
                     repeat_a=10.0, repeat_b=50.0, bookmarks=[30.0, 90.0], media_info=info)
         self.assertEqual(surf.get_width(), 960)
         self.assertEqual(surf.get_height(), 62)
+        # BUG 6.1: Verify actual drawing occurred by checking pixel buffer contains non-zero bytes
+        self.assertTrue(any(b != 0 for b in surf.get_data()))
 
 
 if __name__ == "__main__":

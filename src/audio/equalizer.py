@@ -34,7 +34,7 @@ class EqualizerModel:
 
     def set_band(self, index: int, gain_db: float) -> None:
         if 0 <= index < 10:
-            self.bands[index] = max(-12.0, min(12.0, gain_db))
+            self.bands[index] = max(-24.0, min(12.0, gain_db))
 
     def get_band(self, index: int) -> float:
         if 0 <= index < 10:
@@ -45,6 +45,7 @@ class EqualizerModel:
         if preset_name in EQUALIZER_PRESETS:
             self.bands = list(EQUALIZER_PRESETS[preset_name])
             self.current_preset = preset_name
+            self.enabled = True
             return True
         return False
 
@@ -62,12 +63,12 @@ class EqualizerModel:
             return ""
 
         filters = []
-        if abs(self.preamp_db) > 0.01:
-            filters.append(f"volume=volume={self.preamp_db}dB")
-
         for freq, gain in zip(FREQUENCIES, self.bands):
             if abs(gain) > 0.1:
                 # Octave bandwidth is 1.0 for 10-band octave spacing
                 filters.append(f"equalizer=f={freq}:width_type=o:w=1:g={gain:.1f}")
+
+        if abs(self.preamp_db) > 0.01:
+            filters.append(f"volume=volume={self.preamp_db}dB")
 
         return ",".join(filters)

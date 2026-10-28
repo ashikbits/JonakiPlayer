@@ -6,19 +6,24 @@ Integrates Google Translate, DeepL, LibreTranslate, and Local LLMs (Ollama / LM 
 import json
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from typing import Dict, Optional, Tuple
 
 
 class SubtitleTranslator:
     def __init__(self, provider: str = "google", target_lang: str = "en", api_key: str = "",
-                 local_endpoint: str = "http://localhost:11434/api/generate", local_model: str = "qwen2.5"):
+                 local_endpoint: str = "http://localhost:11434/api/generate", local_model: str = "qwen2.5",
+                 max_cache_size: int = 1000):
         self.provider = provider
         self.target_lang = target_lang
         self.api_key = api_key
         self.local_endpoint = local_endpoint
         self.local_model = local_model
-        # In-memory LRU cache: (text, src, dst) -> translated_text
-        self._cache: Dict[Tuple[str, str, str], str] = {}
+        self.max_cache_size = max_cache_size
+        # In-memory bounded LRU cache: (text, src, dst) -> translated_text
+        self._cache: OrderedDict[Tuple[str, str, str], str] = OrderedDict()
+        import threading
+        self._lock = threading.Lock()
 
     def translate(self, text: str, src_lang: str = "auto", dst_lang: Optional[str] = None) -> str:
         if not text or not text.strip():
@@ -26,8 +31,10 @@ class SubtitleTranslator:
 
         dst = dst_lang or self.target_lang
         cache_key = (text.strip(), src_lang, dst)
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        with self._lock:
+            if cache_key in self._cache:
+                self._cache.move_to_end(cache_key)
+                return self._cache[cache_key]
 
         translated = text
         try:
@@ -42,10 +49,14 @@ class SubtitleTranslator:
             else:
                 translated = self._translate_google(text, src_lang, dst)
 
-            self._cache[cache_key] = translated
+            with self._lock:
+                if len(self._cache) >= self.max_cache_size:
+                    self._cache.popitem(last=False)
+                self._cache[cache_key] = translated
         except Exception as e:
             # Fall back to original text on network timeout
-            translated = f"{text} [{e}]"
+            print(f"[SubtitleTranslator] Translation error: {e}")
+            translated = text
 
         return translated
 
@@ -72,10 +83,15 @@ class SubtitleTranslator:
         if not self.api_key:
             return text
         url = "https://api-free.deepl.com/v2/translate" if self.api_key.endswith(":fx") else "https://api.deepl.com/v2/translate"
+        target_lang = dst.upper()
+        if target_lang == "EN":
+            target_lang = "EN-US"
+        elif target_lang == "PT":
+            target_lang = "PT-BR"
         payload = urllib.parse.urlencode({
             "auth_key": self.api_key,
             "text": text,
-            "target_lang": dst.upper()
+            "target_lang": target_lang
         }).encode("utf-8")
         req = urllib.request.Request(url, data=payload, method="POST")
         with urllib.request.urlopen(req, timeout=3.0) as resp:
@@ -86,12 +102,15 @@ class SubtitleTranslator:
 
     def _translate_libre(self, text: str, src: str, dst: str) -> str:
         url = "https://libretranslate.com/translate"
-        payload = json.dumps({
+        payload_dict = {
             "q": text,
             "source": "auto" if src == "auto" else src,
             "target": dst,
             "format": "text"
-        }).encode("utf-8")
+        }
+        if self.api_key:
+            payload_dict["api_key"] = self.api_key
+        payload = json.dumps(payload_dict).encode("utf-8")
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=3.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -105,6 +124,6 @@ class SubtitleTranslator:
             "stream": False
         }).encode("utf-8")
         req = urllib.request.Request(self.local_endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
+        with urllib.request.urlopen(req, timeout=15.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return data.get("response", text).strip()

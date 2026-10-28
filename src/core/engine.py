@@ -33,27 +33,12 @@ def set_c_numeric_locale() -> None:
         pass
 
 
-def resolve_stream_url(url: str) -> str:
+def resolve_stream_url(url: str) -> tuple:
     """
-    Resolves streaming web pages (e.g. YouTube, Twitch, etc.) to direct playable media streams via yt-dlp if available.
+    Direct playable media streams or web URLs. Handled natively via mpv's ytdl hook.
+    Returns (video_url, audio_url).
     """
-    if not (url.startswith("http://") or url.startswith("https://")):
-        return url
-    direct_exts = ('.mp4', '.mkv', '.webm', '.avi', '.mov', '.ts', '.m3u8', '.mpd', '.mp3', '.flac', '.ogg', '.aac', '.opus')
-    clean_path = url.lower().split("?")[0]
-    if any(clean_path.endswith(ext) for ext in direct_exts):
-        return url
-
-    import subprocess
-    try:
-        res = subprocess.run(["yt-dlp", "-g", "-f", "best", url], capture_output=True, text=True, timeout=5)
-        if res.returncode == 0 and res.stdout.strip():
-            first_url = res.stdout.strip().split("\n")[0].strip()
-            if first_url.startswith("http"):
-                return first_url
-    except Exception:
-        pass
-    return url
+    return url, None
 
 
 class PlaybackState:
@@ -96,12 +81,20 @@ class JonakiCore:
         self.aspect_ratio_mode: int = 0
         self.audio_boost_db: float = 0.0
         self.normalizer_active: bool = False
+        self.enhancement_active: bool = False
+        self.enhancement_preset: str = "Balanced / Default"
+        self.enhancement_gain_db: float = 5.0
         self.subtitle_delay_sec: float = 0.0
         self.audio_delay_sec: float = 0.0
         self.sub_pos: int = 100
-        self.sub_size: int = 55
+        self.sub_size: int = 48
         self.deinterlace_active: bool = False
         self.deband_active: bool = False
+        self.hflip_active: bool = False
+        self.vflip_active: bool = False
+        self._pending_file: Optional[tuple] = None
+        self._preferred_hwdec: str = "vaapi"
+        self._metadata_probed: bool = False
 
         # ProcAmp Color controls (-100 to 100)
         self.brightness: float = 0.0
@@ -110,7 +103,7 @@ class JonakiCore:
         self.hue: float = 0.0
         self.gamma: float = 0.0
 
-        # Equalizer 10 octave bands (-24 dB to +12 dB)
+        # Equalizer 10 octave bands (-12 dB to +12 dB)
         self.equalizer_bands: List[float] = [0.0] * 10
 
         # A-B Repeat Loop
@@ -155,6 +148,8 @@ class JonakiCore:
         self.lib.mpv_terminate_destroy.restype = None
         self.lib.mpv_set_option_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
         self.lib.mpv_set_option_string.restype = ctypes.c_int
+        self.lib.mpv_command.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char_p)]
+        self.lib.mpv_command.restype = ctypes.c_int
         self.lib.mpv_command_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
         self.lib.mpv_command_string.restype = ctypes.c_int
         self.lib.mpv_set_property_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
@@ -166,15 +161,10 @@ class JonakiCore:
     def start_engine(self) -> bool:
         if self.handle:
             return True
-        # Strip WAYLAND_DISPLAY so libmpv strictly connects to GTK's X11/XWayland surface
-        os.environ.pop("WAYLAND_DISPLAY", None)
         set_c_numeric_locale()
         self.handle = self.lib.mpv_create()
         if not self.handle:
             return False
-
-        # Strictly enforce X11 EGL GPU context for reliable embedding
-        self.lib.mpv_set_option_string(self.handle, b"gpu-context", b"x11egl")
 
         # Configure initial hardware options before mpv_initialize
         if self.wid is not None:
@@ -187,15 +177,20 @@ class JonakiCore:
         self.lib.mpv_set_option_string(self.handle, b"force-window", b"no")
         self.lib.mpv_set_option_string(self.handle, b"x11-bypass-compositor", b"no")
         has_nvidia = os.path.exists("/dev/nvidia0") or os.path.exists("/dev/nvidiactl")
-        hwdec_val = b"nvdec,auto-safe" if has_nvidia else b"vaapi"
+        self._preferred_hwdec = "nvdec,auto-safe" if has_nvidia else "vaapi"
+        hwdec_val = self._preferred_hwdec.encode("utf-8")
         self.lib.mpv_set_option_string(self.handle, b"hwdec", hwdec_val)
+        self.hwdec_active = self._preferred_hwdec
         self.lib.mpv_set_option_string(self.handle, b"msg-level", b"all=warn")
         self.lib.mpv_set_option_string(self.handle, b"keep-open", b"yes")
+        self.lib.mpv_set_option_string(self.handle, b"ytdl", b"yes")
+        self.lib.mpv_set_option_string(self.handle, b"ytdl-format", b"bestvideo+bestaudio/best")
         self.lib.mpv_set_option_string(self.handle, b"input-default-bindings", b"no")
         self.lib.mpv_set_option_string(self.handle, b"input-vo-keyboard", b"no")
         self.lib.mpv_set_option_string(self.handle, b"cursor-autohide", b"no")
         self.lib.mpv_set_option_string(self.handle, b"input-cursor", b"no")
         self.lib.mpv_set_option_string(self.handle, b"sub-auto", b"fuzzy")
+        self.lib.mpv_set_option_string(self.handle, b"sub-font-size", str(self.sub_size).encode("utf-8"))
         self.lib.mpv_set_option_string(self.handle, b"audio-client-name", b"Jonaki")
 
         # Native hardware OSD styling (Jonaki / PotPlayer-style top-left notifications)
@@ -211,6 +206,11 @@ class JonakiCore:
 
         ret = self.lib.mpv_initialize(self.handle)
         if ret < 0:
+            try:
+                self.lib.mpv_terminate_destroy(self.handle)
+            except Exception:
+                pass
+            self.handle = None
             return False
 
         # Set initial volume strictly to 100%
@@ -224,18 +224,24 @@ class JonakiCore:
 
     def stop_engine(self) -> None:
         if self._timer_id:
-            GLib.source_remove(self._timer_id)
+            tid = self._timer_id
             self._timer_id = None
+            try:
+                GLib.source_remove(tid)
+            except Exception:
+                pass
         if self.handle:
             h = self.handle
             self.handle = None
-            self.lib.mpv_terminate_destroy(h)
+            try:
+                self.lib.mpv_terminate_destroy(h)
+            except Exception:
+                pass
             self.state = PlaybackState.STOPPED
 
     def set_wid(self, wid: int) -> None:
         self.wid = wid
         if self.handle:
-            self.set_property("gpu-context", "x11egl")
             self.set_property("wid", str(wid))
             self.set_property("vo", "gpu")
             self.set_property("cursor-autohide", "no")
@@ -243,7 +249,15 @@ class JonakiCore:
             if getattr(self, "_pending_file", None):
                 pending = self._pending_file
                 self._pending_file = None
-                self.load_file(*pending)
+                if isinstance(pending, tuple):
+                    self.load_file(*pending)
+
+    def command_args(self, *args: str) -> int:
+        if not self.handle:
+            return -1
+        arr_type = ctypes.c_char_p * (len(args) + 1)
+        c_args = arr_type(*(a.encode("utf-8") for a in args), None)
+        return self.lib.mpv_command(self.handle, c_args)
 
     def command(self, cmd_str: str) -> int:
         if not self.handle:
@@ -253,7 +267,11 @@ class JonakiCore:
     def set_property(self, name: str, value: Any) -> int:
         if not self.handle:
             return -1
-        return self.lib.mpv_set_property_string(self.handle, name.encode("utf-8"), str(value).encode("utf-8"))
+        ret = self.lib.mpv_set_property_string(self.handle, name.encode("utf-8"), str(value).encode("utf-8"))
+        if ret < 0 and name == "af" and str(value):
+            # Audio filter chain rejected; fallback safely to transparent filter
+            self.lib.mpv_set_property_string(self.handle, b"af", b"")
+        return ret
 
     def get_property(self, name: str) -> Optional[str]:
         if not self.handle:
@@ -276,6 +294,35 @@ class JonakiCore:
 
     def _query_time_tick(self) -> bool:
         if not self.handle:
+            self._timer_id = None
+            return False
+
+        # Check demuxing abort / media loading failure
+        if self.state in (PlaybackState.PLAYING, PlaybackState.PAUSED) and self.current_file:
+            if self.get_property("idle-active") == "yes" and not self.get_property("path"):
+                self.state = PlaybackState.STOPPED
+                self.current_file = None
+                self.position = 0.0
+                self.duration = 0.0
+                if self.on_state_change:
+                    self.on_state_change(self.state)
+                return True
+
+        # Query position and duration
+        pos = self.get_property_float("time-pos", 0.0)
+        dur = self.get_property_float("duration", 0.0)
+        self.position = pos
+        self.duration = dur
+
+        # Check track completion (eof-reached) BEFORE handling pause state.
+        # Under keep-open=yes, libmpv automatically pauses when EOF is reached.
+        eof = self.get_property("eof-reached")
+        if eof == "yes" and self.state in (PlaybackState.PLAYING, PlaybackState.PAUSED) and self.current_file:
+            self.state = PlaybackState.STOPPED
+            if self.on_state_change:
+                self.on_state_change(self.state)
+            if self.on_file_end:
+                self.on_file_end()
             return True
 
         # Check pause / play state
@@ -289,27 +336,16 @@ class JonakiCore:
             if self.on_state_change:
                 self.on_state_change(self.state)
 
-        # Query position and duration
-        pos = self.get_property_float("time-pos", 0.0)
-        dur = self.get_property_float("duration", 0.0)
-        self.position = pos
-        self.duration = dur
-
         # A-B Repeat loop enforcement
-        if self.repeat_a is not None and self.repeat_b is not None:
+        if self.repeat_a is not None and self.repeat_b is not None and self.repeat_b > self.repeat_a:
             if self.position >= self.repeat_b:
                 self.seek_absolute(self.repeat_a)
 
-        # Check track completion (eof-reached)
-        eof = self.get_property("eof-reached")
-        if eof == "yes" and self.state == PlaybackState.PLAYING and self.duration > 0 and self.position >= self.duration - 0.5:
-            self.state = PlaybackState.STOPPED
-            if self.on_file_end:
-                self.on_file_end()
-
-        # Update stream metadata if playing
-        if self.state == PlaybackState.PLAYING and self.video_width == 0:
+        # Update stream metadata once per track if playing
+        if self.state == PlaybackState.PLAYING and not self._metadata_probed:
             self._update_media_metadata()
+            if self.video_width > 0 or self.duration > 0:
+                self._metadata_probed = True
 
         if self.on_time_update:
             self.on_time_update(self.position, self.duration)
@@ -322,26 +358,51 @@ class JonakiCore:
         if w > 0:
             self.video_width = w
             self.video_height = h
-            self.video_fps = self.get_property_float("container-fps", 60.0)
+            self.video_fps = self.get_property_float("container-fps", 0.0)
             self.video_codec = (self.get_property("video-format") or "").upper()
             self.audio_codec = (self.get_property("audio-codec-name") or "").upper()
-            self.audio_channels = int(self.get_property_float("audio-params/channels", 2))
-            self.video_aspect = f"{w}:{h}"
+            self.audio_channels = int(self.get_property_float("audio-params/channel-count", 2))
+            aspect_flt = self.get_property_float("video-params/aspect", 0.0)
+            if aspect_flt > 0:
+                if abs(aspect_flt - 16 / 9) < 0.03:
+                    self.video_aspect = "16:9"
+                elif abs(aspect_flt - 4 / 3) < 0.03:
+                    self.video_aspect = "4:3"
+                elif abs(aspect_flt - 2.35) < 0.05:
+                    self.video_aspect = "2.35:1"
+                elif abs(aspect_flt - 1.85) < 0.05:
+                    self.video_aspect = "1.85:1"
+                elif abs(aspect_flt - 21 / 9) < 0.05:
+                    self.video_aspect = "21:9"
+                else:
+                    self.video_aspect = f"{aspect_flt:.2f}:1"
+            else:
+                self.video_aspect = f"{w}:{h}"
 
     # --- Playback Operations ---
 
     def load_file(self, path_or_url: str, start_pts: float = 0.0, sub_file: Optional[str] = None,
                   audio_file: Optional[str] = None, user_agent: Optional[str] = None) -> None:
+        if not self.wid and self.get_property("vo") != "null":
+            self._pending_file = (path_or_url, start_pts, sub_file, audio_file, user_agent)
+            return
+
         self.current_file = path_or_url
         self.current_title = os.path.basename(path_or_url) if not path_or_url.startswith("http") else path_or_url
         self.repeat_a = None
         self.repeat_b = None
         self.video_width = 0
         self.video_height = 0
+        self.video_fps = 0.0
+        self._metadata_probed = False
 
-        resolved = resolve_stream_url(path_or_url)
-        clean = resolved.replace('"', '\\"')
+        if user_agent:
+            self.set_property("user-agent", user_agent)
 
+        self._load_file_internal(path_or_url, path_or_url, start_pts, sub_file, audio_file)
+
+    def _load_file_internal(self, orig_path: str, resolved: str, start_pts: float,
+                            sub_file: Optional[str], audio_file: Optional[str]) -> None:
         # Auto-detect sibling subtitles if none explicitly specified
         if not sub_file and not resolved.startswith(("http://", "https://", "rtsp://", "rtmp://", "mms://")):
             base, _ = os.path.splitext(resolved)
@@ -351,20 +412,27 @@ class JonakiCore:
                     sub_file = candidate
                     break
 
-        self.command(f'loadfile "{clean}" replace')
+        opts = []
+        if start_pts > 0:
+            opts.append(f"start={start_pts}")
+        if sub_file:
+            opts.append(f"sub-file={sub_file}")
+        if audio_file:
+            opts.append(f"audio-file={audio_file}")
+
+        if opts:
+            self.command_args("loadfile", resolved, "replace", "-1", ",".join(opts))
+        else:
+            self.command_args("loadfile", resolved, "replace")
+
         self.set_property("pause", "no")
         self.state = PlaybackState.PLAYING
         if self.on_state_change:
             self.on_state_change(self.state)
 
-        if start_pts > 0:
-            self.seek_absolute(start_pts)
-        if sub_file:
-            self.load_subtitle(sub_file)
-        if audio_file:
-            self.load_audio_track(audio_file)
-
     def play(self) -> None:
+        if self.get_property("eof-reached") == "yes" or (self.duration > 0 and self.position >= self.duration - 0.2):
+            self.seek_absolute(0.0)
         self.set_property("pause", "no")
         self.state = PlaybackState.PLAYING
         if self.on_state_change:
@@ -386,6 +454,13 @@ class JonakiCore:
         self.command("stop")
         self.state = PlaybackState.STOPPED
         self.position = 0.0
+        self.duration = 0.0
+        self.current_file = None
+        self.current_title = None
+        self.video_width = 0
+        self.video_height = 0
+        self.video_fps = 0.0
+        self._metadata_probed = False
         if self.on_state_change:
             self.on_state_change(self.state)
 
@@ -423,7 +498,7 @@ class JonakiCore:
 
     def set_equalizer_band(self, band_index: int, gain_db: float) -> None:
         if 0 <= band_index <= 9:
-            self.equalizer_bands[band_index] = max(-24.0, min(12.0, gain_db))
+            self.equalizer_bands[band_index] = max(-12.0, min(12.0, gain_db))
             self._apply_audio_filters()
 
     def set_audio_delay(self, delay_sec: float) -> None:
@@ -438,6 +513,15 @@ class JonakiCore:
         self.normalizer_active = enabled
         self._apply_audio_filters()
 
+    def set_audio_enhancement(self, enabled: bool, preset: str = "Balanced / Default", gain_db: float = 5.0) -> None:
+        self.enhancement_active = enabled
+        self.enhancement_preset = preset
+        self.enhancement_gain_db = gain_db
+        if self.enhancement_active and self.enhancement_preset == "Off":
+            self.enhancement_preset = "Balanced / Default"
+            self.enhancement_gain_db = 5.0
+        self._apply_audio_filters()
+
     def _apply_audio_filters(self) -> None:
         filters = []
         freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
@@ -448,30 +532,54 @@ class JonakiCore:
         if eq_parts:
             filters.extend(eq_parts)
 
-        if self.audio_boost_db > 0.05:
-            filters.append(f"volume={self.audio_boost_db:.1f}dB")
-
         if self.normalizer_active:
-            filters.append("dynaudnorm=f=150:g=15")
+            m_val = 6.0 if self.enhancement_active else 12.0
+            filters.append(f"dynaudnorm=f=125:g=15:m={m_val:.1f}:r=0.9:b=1")
+
+        if self.enhancement_active and self.enhancement_preset == "Dialogue Focus":
+            filters.append("equalizer=f=1200:width_type=q:w=1.2:g=2.5")
+
+        enh_gain = self.enhancement_gain_db if self.enhancement_active else 0.0
+        tot_gain = enh_gain + self.audio_boost_db
+        if tot_gain > 0.05:
+            filters.append(f"volume={tot_gain:.1f}dB")
+
+        if self.enhancement_active:
+            if self.enhancement_preset == "Gentle / Low":
+                filters.append("acompressor=threshold=-12dB:ratio=2.0:attack=20:release=250:knee=3.0")
+            elif self.enhancement_preset == "Dialogue Focus":
+                filters.append("acompressor=threshold=-12dB:ratio=3.0:attack=12:release=180:knee=2.5")
+            elif self.enhancement_preset == "Dynamic / High":
+                filters.append("acompressor=threshold=-12dB:ratio=3.5:attack=12:release=180:knee=2.5")
+            else:
+                filters.append("acompressor=threshold=-10dB:ratio=2.5:attack=15:release=200:knee=2.8")
+
+        if filters:
+            lim_val = 0.90 if (self.enhancement_active and self.enhancement_preset == "Dynamic / High") else (0.92 if self.enhancement_active else 0.95)
+            filters.append(f"alimiter=level_in=1:level_out=1:limit={lim_val}:attack=5:release=50:asc=1:level=false")
 
         af_str = ",".join(filters)
         self.set_property("af", af_str)
 
     # --- Video Processing & Balance (ProcAmp) ---
 
-    def set_video_colors(self, brightness: float = 0.0, contrast: float = 0.0,
-                          saturation: float = 0.0, hue: float = 0.0, gamma: float = 0.0) -> None:
-        self.brightness = max(-100.0, min(100.0, brightness))
-        self.contrast = max(-100.0, min(100.0, contrast))
-        self.saturation = max(-100.0, min(100.0, saturation))
-        self.hue = max(-100.0, min(100.0, hue))
-        self.gamma = max(-100.0, min(100.0, gamma))
-
-        self.set_property("brightness", str(int(self.brightness)))
-        self.set_property("contrast", str(int(self.contrast)))
-        self.set_property("saturation", str(int(self.saturation)))
-        self.set_property("hue", str(int(self.hue)))
-        self.set_property("gamma", str(int(self.gamma)))
+    def set_video_colors(self, brightness: Optional[float] = None, contrast: Optional[float] = None,
+                          saturation: Optional[float] = None, hue: Optional[float] = None, gamma: Optional[float] = None) -> None:
+        if brightness is not None:
+            self.brightness = max(-100.0, min(100.0, brightness))
+            self.set_property("brightness", str(int(self.brightness)))
+        if contrast is not None:
+            self.contrast = max(-100.0, min(100.0, contrast))
+            self.set_property("contrast", str(int(self.contrast)))
+        if saturation is not None:
+            self.saturation = max(-100.0, min(100.0, saturation))
+            self.set_property("saturation", str(int(self.saturation)))
+        if hue is not None:
+            self.hue = max(-100.0, min(100.0, hue))
+            self.set_property("hue", str(int(self.hue)))
+        if gamma is not None:
+            self.gamma = max(-100.0, min(100.0, gamma))
+            self.set_property("gamma", str(int(self.gamma)))
 
     def cycle_aspect_ratio(self) -> str:
         self.aspect_ratio_mode = (self.aspect_ratio_mode + 1) % 6
@@ -484,11 +592,22 @@ class JonakiCore:
             "2.35:1 CinemaScope",
             "1.85:1 VistaVision"
         ]
-        self.set_property("video-aspect-override", modes[self.aspect_ratio_mode])
+        if self.aspect_ratio_mode == 1:
+            self.set_property("keepaspect", "no")
+        else:
+            self.set_property("keepaspect", "yes")
+            self.set_property("video-aspect-override", modes[self.aspect_ratio_mode])
         return labels[self.aspect_ratio_mode]
 
     def set_aspect_ratio_mode(self, mode: str) -> None:
-        self.set_property("video-aspect-override", mode)
+        modes = ["-1", "no", "16:9", "4:3", "2.35:1", "1.85:1"]
+        if mode in modes:
+            self.aspect_ratio_mode = modes.index(mode)
+        if mode == "no":
+            self.set_property("keepaspect", "no")
+        else:
+            self.set_property("keepaspect", "yes")
+            self.set_property("video-aspect-override", mode)
 
     def toggle_stretch(self) -> str:
         cur = self.get_property("keepaspect")
@@ -507,32 +626,37 @@ class JonakiCore:
         return labels[self.video_rotation_index]
 
     def toggle_horizontal_flip(self) -> bool:
+        self.hflip_active = not getattr(self, "hflip_active", False)
         self.command("vf toggle hflip")
-        return self.is_horizontal_flip_active()
+        return self.hflip_active
 
     def toggle_vertical_flip(self) -> bool:
+        self.vflip_active = not getattr(self, "vflip_active", False)
         self.command("vf toggle vflip")
-        return self.is_vertical_flip_active()
+        return self.vflip_active
 
     def is_horizontal_flip_active(self) -> bool:
-        vf = self.get_property("vf") or ""
-        return "hflip" in vf
+        return getattr(self, "hflip_active", False)
 
     def is_vertical_flip_active(self) -> bool:
-        vf = self.get_property("vf") or ""
-        return "vflip" in vf
+        return getattr(self, "vflip_active", False)
 
     def reset_video_orientation(self) -> None:
         self.video_rotation_index = 0
         self.set_property("video-rotate", "0")
-        vf = self.get_property("vf") or ""
-        if "hflip" in vf:
+        if getattr(self, "hflip_active", False):
             self.command("vf toggle hflip")
-        if "vflip" in vf:
+            self.hflip_active = False
+        if getattr(self, "vflip_active", False):
             self.command("vf toggle vflip")
+            self.vflip_active = False
 
     def toggle_hwdec(self) -> None:
-        self.hwdec_active = "vaapi" if self.hwdec_active != "vaapi" else "no"
+        preferred = getattr(self, "_preferred_hwdec", "auto-safe")
+        if self.hwdec_active != "no":
+            self.hwdec_active = "no"
+        else:
+            self.hwdec_active = preferred
         self.set_property("hwdec", self.hwdec_active)
 
     def toggle_hdr(self) -> None:
@@ -560,13 +684,11 @@ class JonakiCore:
 
     def load_subtitle(self, sub_path: str) -> None:
         if os.path.exists(sub_path):
-            clean = sub_path.replace('"', '\\"')
-            self.command(f'sub-add "{clean}" select')
+            self.command_args("sub-add", sub_path, "select")
 
     def load_audio_track(self, track_file: str) -> None:
-        if os.path.exists(track_file):
-            clean = track_file.replace('"', '\\"')
-            self.command(f'audio-add "{clean}" select')
+        if os.path.exists(track_file) or track_file.startswith("http"):
+            self.command_args("audio-add", track_file, "select")
 
     def cycle_subtitle_track(self) -> None:
         self.command("cycle sub")
@@ -642,10 +764,16 @@ class JonakiCore:
         dur = self.duration or self.get_property_float("duration", 0.0)
         v_bitrate = int(self.get_property_float("video-bitrate", 0))
         a_bitrate = int(self.get_property_float("audio-bitrate", 0))
-        sample_rate = int(self.get_property_float("audio-params/samplerate", 48000))
-        channels = self.get_property("audio-params/channels") or "2.0 (Stereo)"
-        pix_fmt = self.get_property("video-params/pixelformat") or "yuv420p"
-        colormatrix = self.get_property("video-params/colormatrix") or "bt.709"
+
+        audio_tracks = self.get_audio_tracks()
+        video_tracks = self.get_video_tracks()
+        has_audio = bool(audio_tracks) or bool(self.audio_codec) or bool(self.get_property("audio-codec-name"))
+        has_video = bool(video_tracks) or bool(self.video_codec) or bool(self.get_property("video-format")) or (w > 0)
+
+        sample_rate = int(self.get_property_float("audio-params/samplerate", 48000)) if has_audio else 0
+        channels = (self.get_property("audio-params/channels") or "2.0 (Stereo)") if has_audio else "None"
+        pix_fmt = (self.get_property("video-params/pixelformat") or "yuv420p") if has_video else "None"
+        colormatrix = (self.get_property("video-params/colormatrix") or "bt.709") if has_video else "None"
         hwdec_cur = self.get_property("hwdec-current") or "no"
 
         return {
@@ -653,14 +781,14 @@ class JonakiCore:
             "title": self.current_title or "No Title",
             "filesize_bytes": filesize,
             "duration_sec": dur,
-            "video_codec": (self.get_property("video-format") or self.video_codec or "Unknown").upper(),
+            "video_codec": (self.get_property("video-format") or self.video_codec or "Unknown").upper() if has_video else "NONE",
             "width": w,
             "height": h,
             "fps": fps,
             "pixel_format": pix_fmt,
             "colormatrix": colormatrix,
             "video_bitrate": v_bitrate,
-            "audio_codec": (self.get_property("audio-codec-name") or self.audio_codec or "Unknown").upper(),
+            "audio_codec": (self.get_property("audio-codec-name") or self.audio_codec or "Unknown").upper() if has_audio else "NONE",
             "audio_channels": channels,
             "sample_rate": sample_rate,
             "audio_bitrate": a_bitrate,
@@ -674,6 +802,8 @@ class JonakiCore:
 
     def set_repeat_point_a(self) -> float:
         self.repeat_a = self.position
+        if self.repeat_b is not None and self.repeat_b <= self.repeat_a:
+            self.repeat_b = None
         return self.repeat_a
 
     def set_repeat_point_b(self) -> Optional[float]:
@@ -687,8 +817,7 @@ class JonakiCore:
         self.repeat_b = None
 
     def take_screenshot(self, output_path: str) -> bool:
-        clean = output_path.replace('"', '\\"')
-        ret = self.command(f'screenshot-to-file "{clean}" video')
+        ret = self.command_args("screenshot-to-file", output_path, "video")
         return ret == 0
 
 

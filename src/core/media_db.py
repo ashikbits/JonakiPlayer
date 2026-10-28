@@ -29,12 +29,30 @@ class MediaDatabase:
                 except Exception:
                     pass
         self.db_path = db_path
-        self._init_database()
+        try:
+            self._init_database()
+        except sqlite3.DatabaseError as e:
+            # Corrupted database: quarantine and recreate clean database
+            try:
+                corrupt_backup = f"{self.db_path}.corrupt.{int(time.time())}"
+                if os.path.exists(self.db_path):
+                    shutil.move(self.db_path, corrupt_backup)
+                for ext in ("-wal", "-shm"):
+                    p = self.db_path + ext
+                    if os.path.exists(p):
+                        try:
+                            os.unlink(p)
+                        except OSError:
+                            pass
+            except Exception:
+                pass
+            self._init_database()
 
     @contextlib.contextmanager
     def _get_connection(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
         try:
             yield conn
         finally:
@@ -43,6 +61,7 @@ class MediaDatabase:
     def _init_database(self) -> None:
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("PRAGMA journal_mode = WAL;")
             
             # History & Resume points
             cursor.execute("""
@@ -59,6 +78,17 @@ class MediaDatabase:
                 volume REAL DEFAULT 100.0
             );
             """)
+
+            # Check and migrate legacy columns if table was created by older schema
+            cursor.execute("PRAGMA table_info(playback_history)")
+            existing_cols = {row["name"] for row in cursor.fetchall()}
+            if existing_cols:
+                if "audio_track" not in existing_cols:
+                    cursor.execute("ALTER TABLE playback_history ADD COLUMN audio_track INTEGER DEFAULT 1")
+                if "subtitle_track" not in existing_cols:
+                    cursor.execute("ALTER TABLE playback_history ADD COLUMN subtitle_track INTEGER DEFAULT 1")
+                if "volume" not in existing_cols:
+                    cursor.execute("ALTER TABLE playback_history ADD COLUMN volume REAL DEFAULT 100.0")
 
             # Bookmarks
             cursor.execute("""
@@ -119,15 +149,15 @@ class MediaDatabase:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(file_path) DO UPDATE SET
                 title = coalesce(?, title),
-                duration = max(duration, ?),
-                last_position = ?,
+                duration = max(coalesce(duration, 0.0), coalesce(?, 0.0)),
+                last_position = case when ? > 0.0 then ? else last_position end,
                 last_played_at = ?,
                 completed = ?,
                 audio_track = ?,
                 subtitle_track = ?,
                 volume = ?
             """, (file_path, title, duration, position, now, completed, audio_track, subtitle_track, volume,
-                  title, duration, position, now, completed, audio_track, subtitle_track, volume))
+                  title, duration, position, position, now, completed, audio_track, subtitle_track, volume))
             conn.commit()
 
     def get_playback_position(self, file_path: str) -> Optional[float]:
@@ -154,7 +184,12 @@ class MediaDatabase:
                        position: float = 0.0) -> None:
         """
         Adds or updates a media file in the playback history ledger.
+        Preserves existing last_position if position is 0.0 or not specified.
         """
+        if position <= 0.0:
+            existing_pos = self.get_playback_position(file_path)
+            if existing_pos is not None and existing_pos > 0.0:
+                position = existing_pos
         self.save_playback_position(file_path=file_path, position=position, duration=duration, title=title)
 
     def clear_history(self) -> None:
@@ -217,7 +252,8 @@ class MediaDatabase:
             cursor.execute("INSERT OR IGNORE INTO playlist_albums (album_name, created_at) VALUES (?, ?)", (album_name, time.time()))
             conn.commit()
             cursor.execute("SELECT id FROM playlist_albums WHERE album_name = ?", (album_name,))
-            return cursor.fetchone()["id"]
+            row = cursor.fetchone()
+            return row["id"] if row else 1
 
     def get_playlist_items(self, album_id: int = 1) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
@@ -233,10 +269,12 @@ class MediaDatabase:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM playlist_items WHERE album_id = ?", (album_id,))
             for idx, item in enumerate(items):
+                path = item.get("path") or item.get("file_path", "")
+                title = item.get("title") or (os.path.basename(path) if path else "")
                 cursor.execute("""
                 INSERT INTO playlist_items (album_id, file_path, title, duration, order_index)
                 VALUES (?, ?, ?, ?, ?)
-                """, (album_id, item.get("path", ""), item.get("title", ""), item.get("duration", 0.0), idx))
+                """, (album_id, path, title, item.get("duration", 0.0), idx))
             conn.commit()
 
     # --- Settings Key-Value ---
