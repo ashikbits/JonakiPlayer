@@ -11,6 +11,7 @@ Integrates packed libmpv directly in-process via C-FFI, delivering authentic Pot
 import os
 import sys
 import time
+import math
 import ctypes
 import json
 from typing import Callable, Optional, Dict, Any, List
@@ -92,6 +93,9 @@ class JonakiCore:
         self.deband_active: bool = False
         self.hflip_active: bool = False
         self.vflip_active: bool = False
+        self.video_scale_x: float = 1.0
+        self.video_scale_y: float = 1.0
+        self.video_zoom: float = 1.0
         self._pending_file: Optional[tuple] = None
         self._preferred_hwdec: str = "vaapi"
         self._metadata_probed: bool = False
@@ -650,6 +654,45 @@ class JonakiCore:
         if getattr(self, "vflip_active", False):
             self.command("vf toggle vflip")
             self.vflip_active = False
+
+    def scale_video_height(self, delta: float = 0.05) -> float:
+        """
+        Incrementally scale video height independently.
+        Clamped between 0.2 (20%) and 3.0 (300%).
+        """
+        self.video_scale_y = round(max(0.2, min(3.0, self.video_scale_y + delta)), 2)
+        self.set_property("video-scale-y", f"{self.video_scale_y:.2f}")
+        return self.video_scale_y
+
+    def scale_video_width(self, delta: float = 0.05) -> float:
+        """
+        Incrementally scale video width independently.
+        Clamped between 0.2 (20%) and 3.0 (300%).
+        """
+        self.video_scale_x = round(max(0.2, min(3.0, self.video_scale_x + delta)), 2)
+        self.set_property("video-scale-x", f"{self.video_scale_x:.2f}")
+        return self.video_scale_x
+
+    def zoom_video(self, delta: float = 0.05) -> float:
+        """
+        Incrementally zoom video while preserving aspect ratio.
+        Clamped between 0.2 (20%) and 4.0 (400%).
+        """
+        self.video_zoom = round(max(0.2, min(4.0, self.video_zoom + delta)), 2)
+        log2_zoom = math.log2(self.video_zoom)
+        self.set_property("video-zoom", f"{log2_zoom:.4f}")
+        return self.video_zoom
+
+    def reset_video_dimensions(self) -> None:
+        """
+        Restore default video scale and zoom values (1.0x / 100%).
+        """
+        self.video_scale_x = 1.0
+        self.video_scale_y = 1.0
+        self.video_zoom = 1.0
+        self.set_property("video-scale-x", "1.00")
+        self.set_property("video-scale-y", "1.00")
+        self.set_property("video-zoom", "0.00")
 
     def toggle_hwdec(self) -> None:
         preferred = getattr(self, "_preferred_hwdec", "auto-safe")

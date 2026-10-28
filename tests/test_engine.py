@@ -342,6 +342,67 @@ class TestJonakiCore(unittest.TestCase):
         self.core.set_speed(1.5)
         self.assertEqual(self.core.speed, 1.5)
 
+    def test_video_scaling_and_zoom(self):
+        """Test independent video height/width scaling, zoom, clamping, and reset."""
+        import math
+        # Initial defaults
+        self.assertEqual(self.core.video_scale_x, 1.0)
+        self.assertEqual(self.core.video_scale_y, 1.0)
+        self.assertEqual(self.core.video_zoom, 1.0)
+
+        # Height scaling
+        new_h = self.core.scale_video_height(+0.05)
+        self.assertEqual(new_h, 1.05)
+        self.assertEqual(self.core.video_scale_y, 1.05)
+        # Verify independence: width and zoom unchanged
+        self.assertEqual(self.core.video_scale_x, 1.0)
+        self.assertEqual(self.core.video_zoom, 1.0)
+
+        # Height decrement
+        new_h = self.core.scale_video_height(-0.10)
+        self.assertEqual(new_h, 0.95)
+
+        # Height limits: max 3.0, min 0.2
+        for _ in range(50):
+            self.core.scale_video_height(+0.1)
+        self.assertEqual(self.core.video_scale_y, 3.0)
+        for _ in range(50):
+            self.core.scale_video_height(-0.1)
+        self.assertEqual(self.core.video_scale_y, 0.2)
+
+        # Width scaling
+        new_w = self.core.scale_video_width(+0.05)
+        self.assertEqual(new_w, 1.05)
+        self.assertEqual(self.core.video_scale_x, 1.05)
+        # Width limits: max 3.0, min 0.2
+        for _ in range(50):
+            self.core.scale_video_width(+0.1)
+        self.assertEqual(self.core.video_scale_x, 3.0)
+        for _ in range(50):
+            self.core.scale_video_width(-0.1)
+        self.assertEqual(self.core.video_scale_x, 0.2)
+
+        # Zoom scaling
+        new_z = self.core.zoom_video(+0.05)
+        self.assertEqual(new_z, 1.05)
+        self.assertEqual(self.core.video_zoom, 1.05)
+        # Zoom limits: max 4.0, min 0.2
+        for _ in range(70):
+            self.core.zoom_video(+0.1)
+        self.assertEqual(self.core.video_zoom, 4.0)
+        for _ in range(50):
+            self.core.zoom_video(-0.1)
+        self.assertEqual(self.core.video_zoom, 0.2)
+
+        # Reset dimensions
+        self.core.reset_video_dimensions()
+        self.assertEqual(self.core.video_scale_x, 1.0)
+        self.assertEqual(self.core.video_scale_y, 1.0)
+        self.assertEqual(self.core.video_zoom, 1.0)
+        self.assertEqual(self.core.get_property("video-scale-x"), "1.000000")
+        self.assertEqual(self.core.get_property("video-scale-y"), "1.000000")
+        self.assertEqual(self.core.get_property("video-zoom"), "0.000000")
+
 
 if __name__ == "__main__":
     unittest.main()

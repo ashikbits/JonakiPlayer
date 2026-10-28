@@ -742,6 +742,36 @@ class TestVideoSubsystemAndSubtitles(BasePlaybackTest):
         self.assertEqual(info["width"], 320)
         self.assertEqual(info["height"], 240)
 
+    def test_tc_vid_18_video_scaling_during_playback(self):
+        """TC-VID-18: Video scaling and zoom during active playback preserves playback state, position, and audio."""
+        fpath = corpus_path("valid_h264_aac.mp4")
+        self.core.load_file(fpath)
+        self.wait_for_playback(0.3)
+        self.assertEqual(self.core.state, PlaybackState.PLAYING)
+        initial_pos = self.core.position
+
+        # Apply scaling
+        self.core.scale_video_height(+0.10)
+        self.core.scale_video_width(-0.05)
+        self.core.zoom_video(+0.15)
+
+        self.assertEqual(self.core.video_scale_y, 1.10)
+        self.assertEqual(self.core.video_scale_x, 0.95)
+        self.assertEqual(self.core.video_zoom, 1.15)
+
+        # Advance playback and ensure still playing
+        self.wait_for_playback(0.2)
+        self.assertEqual(self.core.state, PlaybackState.PLAYING)
+        self.assertGreaterEqual(self.core.position, initial_pos)
+        self.assertFalse(self.core.is_muted)
+
+        # Reset
+        self.core.reset_video_dimensions()
+        self.assertEqual(self.core.video_scale_y, 1.0)
+        self.assertEqual(self.core.video_scale_x, 1.0)
+        self.assertEqual(self.core.video_zoom, 1.0)
+        self.assertEqual(self.core.state, PlaybackState.PLAYING)
+
 
 if __name__ == "__main__":
     unittest.main()

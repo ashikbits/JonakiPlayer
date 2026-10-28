@@ -566,6 +566,54 @@ class JonakiMainWindow(Gtk.Window):
                 self.toggle_fullscreen()
             return True
 
+        # Video Frame Scaling & Zoom Shortcuts (Alternative: Shift + Alt + Arrows / 0 / = / -)
+        if shift and alt and not ctrl:
+            if keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
+                self.handle_command("CMD_VIDEO_SCALE_HEIGHT_UP")
+                return True
+            if keyval in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
+                self.handle_command("CMD_VIDEO_SCALE_HEIGHT_DOWN")
+                return True
+            if keyval in (Gdk.KEY_Right, Gdk.KEY_KP_Right):
+                self.handle_command("CMD_VIDEO_SCALE_WIDTH_UP")
+                return True
+            if keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
+                self.handle_command("CMD_VIDEO_SCALE_WIDTH_DOWN")
+                return True
+            if keyval in (Gdk.KEY_0, Gdk.KEY_KP_0, Gdk.KEY_KP_Insert, Gdk.KEY_parenright):
+                self.handle_command("CMD_VIDEO_SCALE_RESET")
+                return True
+            if keyval in (Gdk.KEY_equal, Gdk.KEY_plus, Gdk.KEY_KP_Equal, Gdk.KEY_KP_Add):
+                self.handle_command("CMD_VIDEO_ZOOM_IN")
+                return True
+            if keyval in (Gdk.KEY_minus, Gdk.KEY_underscore, Gdk.KEY_KP_Subtract):
+                self.handle_command("CMD_VIDEO_ZOOM_OUT")
+                return True
+
+        # Video Frame Scaling & Zoom Shortcuts (Numpad: KP_8, KP_2, KP_6, KP_4, KP_5, KP_9, KP_1)
+        if not (ctrl or alt or shift):
+            if keyval == Gdk.KEY_KP_8:
+                self.handle_command("CMD_VIDEO_SCALE_HEIGHT_UP")
+                return True
+            if keyval == Gdk.KEY_KP_2:
+                self.handle_command("CMD_VIDEO_SCALE_HEIGHT_DOWN")
+                return True
+            if keyval == Gdk.KEY_KP_6:
+                self.handle_command("CMD_VIDEO_SCALE_WIDTH_UP")
+                return True
+            if keyval == Gdk.KEY_KP_4:
+                self.handle_command("CMD_VIDEO_SCALE_WIDTH_DOWN")
+                return True
+            if keyval in (Gdk.KEY_KP_5, Gdk.KEY_KP_Begin):
+                self.handle_command("CMD_VIDEO_SCALE_RESET")
+                return True
+            if keyval == Gdk.KEY_KP_9:
+                self.handle_command("CMD_VIDEO_ZOOM_IN")
+                return True
+            if keyval == Gdk.KEY_KP_1:
+                self.handle_command("CMD_VIDEO_ZOOM_OUT")
+                return True
+
         # Left / Right Seeks & Alt+Left/Right Subtitle Sync
         if keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
             if alt and not (ctrl or shift):
@@ -1028,6 +1076,27 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id == "CMD_VIDEO_STRETCH":
             mode_str = self.core.toggle_stretch()
             self.osd.show_osd(f"Video Fit: {mode_str}")
+        elif cmd_id == "CMD_VIDEO_SCALE_HEIGHT_UP":
+            val = self.core.scale_video_height(+0.05)
+            self.osd.show_osd(f"Video Height: {int(round(val * 100))}%")
+        elif cmd_id == "CMD_VIDEO_SCALE_HEIGHT_DOWN":
+            val = self.core.scale_video_height(-0.05)
+            self.osd.show_osd(f"Video Height: {int(round(val * 100))}%")
+        elif cmd_id == "CMD_VIDEO_SCALE_WIDTH_UP":
+            val = self.core.scale_video_width(+0.05)
+            self.osd.show_osd(f"Video Width: {int(round(val * 100))}%")
+        elif cmd_id == "CMD_VIDEO_SCALE_WIDTH_DOWN":
+            val = self.core.scale_video_width(-0.05)
+            self.osd.show_osd(f"Video Width: {int(round(val * 100))}%")
+        elif cmd_id == "CMD_VIDEO_SCALE_RESET":
+            self.core.reset_video_dimensions()
+            self.osd.show_osd("Video Dimensions: Reset (100%)")
+        elif cmd_id == "CMD_VIDEO_ZOOM_IN":
+            val = self.core.zoom_video(+0.05)
+            self.osd.show_osd(f"Video Zoom: {int(round(val * 100))}%")
+        elif cmd_id == "CMD_VIDEO_ZOOM_OUT":
+            val = self.core.zoom_video(-0.05)
+            self.osd.show_osd(f"Video Zoom: {int(round(val * 100))}%")
         elif cmd_id in ("CMD_CONTROL_BOX", "ID_CONTROL_BOX_WINDOW", "CMD_PREFERENCES_DIALOG", "CMD_EQUALIZER_DIALOG"):
             self.control_box.show_all()
         elif cmd_id in ("CMD_PLAYLIST_WINDOW", "ID_PLAYLIST_WINDOW"):

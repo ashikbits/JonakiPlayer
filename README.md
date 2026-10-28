@@ -207,6 +207,13 @@ yt-dlp -o - -f best "https://www.youtube.com/watch?v=..." | jonaki -
 | `Ctrl+Alt+S` | Search Subtitles Online |
 | `Ctrl+E` | Export Current Video Frame (Snapshot) |
 | `F1` | Open About Dialog |
+| `KP_8` / `Shift+Alt+Up` | Increase Video Height (+5%) |
+| `KP_2` / `Shift+Alt+Down` | Decrease Video Height (-5%) |
+| `KP_6` / `Shift+Alt+Right` | Increase Video Width (+5%) |
+| `KP_4` / `Shift+Alt+Left` | Decrease Video Width (-5%) |
+| `KP_5` / `Shift+Alt+0` | Reset Video Dimensions & Zoom (100%) |
+| `KP_9` / `Shift+Alt+=` | Video Zoom In (+5%) |
+| `KP_1` / `Shift+Alt+-` | Video Zoom Out (-5%) |
 
 ---
 

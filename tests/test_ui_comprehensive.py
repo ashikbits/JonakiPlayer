@@ -204,6 +204,10 @@ class TestKeyboardShortcuts(unittest.TestCase):
         self.win.core.adjust_subtitle_pos = MagicMock(return_value=100)
         self.win.core.set_subtitle_font_size = MagicMock()
         self.win.core.set_video_colors = MagicMock()
+        self.win.core.scale_video_height = MagicMock(return_value=1.05)
+        self.win.core.scale_video_width = MagicMock(return_value=1.05)
+        self.win.core.zoom_video = MagicMock(return_value=1.05)
+        self.win.core.reset_video_dimensions = MagicMock()
 
     def tearDown(self):
         self.win.destroy()
@@ -471,6 +475,145 @@ class TestKeyboardShortcuts(unittest.TestCase):
             ret = self._simulate_key(Gdk.KEY_space)
             self.assertFalse(ret, "Key press should pass through to text entry")
             self.win.core.play_pause.assert_not_called()
+
+    def test_TC_KEY_19_video_scaling_shortcuts(self):
+        """TC-KEY-19: Video frame scaling on numpad (KP_8,2,6,4,5,9,1) and alternative (Shift+Alt+Arrows/0/=/-)."""
+        # 1. Height Scaling
+        with patch.object(self.win, "handle_command", wraps=self.win.handle_command) as mock_cmd:
+            # KP_8
+            ret = self._simulate_key(Gdk.KEY_KP_8)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_HEIGHT_UP")
+            self.win.core.scale_video_height.assert_called_with(0.05)
+
+            # Shift + Alt + Up
+            ret = self._simulate_key(Gdk.KEY_Up, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_HEIGHT_UP")
+
+            # KP_2
+            ret = self._simulate_key(Gdk.KEY_KP_2)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_HEIGHT_DOWN")
+            self.win.core.scale_video_height.assert_called_with(-0.05)
+
+            # Shift + Alt + Down
+            ret = self._simulate_key(Gdk.KEY_Down, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_HEIGHT_DOWN")
+
+            # 2. Width Scaling
+            # KP_6
+            ret = self._simulate_key(Gdk.KEY_KP_6)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_WIDTH_UP")
+            self.win.core.scale_video_width.assert_called_with(0.05)
+
+            # Shift + Alt + Right
+            ret = self._simulate_key(Gdk.KEY_Right, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_WIDTH_UP")
+
+            # KP_4
+            ret = self._simulate_key(Gdk.KEY_KP_4)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_WIDTH_DOWN")
+            self.win.core.scale_video_width.assert_called_with(-0.05)
+
+            # Shift + Alt + Left
+            ret = self._simulate_key(Gdk.KEY_Left, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_WIDTH_DOWN")
+
+            # 3. Reset Dimensions
+            # KP_5
+            ret = self._simulate_key(Gdk.KEY_KP_5)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_RESET")
+            self.win.core.reset_video_dimensions.assert_called()
+
+            # KP_Begin (numpad 5 with NumLock off)
+            ret = self._simulate_key(Gdk.KEY_KP_Begin)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_RESET")
+
+            # Shift + Alt + 0 / Shift + Alt + parenright
+            ret = self._simulate_key(Gdk.KEY_0, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_RESET")
+
+            ret = self._simulate_key(Gdk.KEY_parenright, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_RESET")
+
+            # 4. Zoom Scaling
+            # KP_9
+            ret = self._simulate_key(Gdk.KEY_KP_9)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_IN")
+            self.win.core.zoom_video.assert_called_with(0.05)
+
+            # Shift + Alt + = / Shift + Alt + plus
+            ret = self._simulate_key(Gdk.KEY_equal, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_IN")
+
+            ret = self._simulate_key(Gdk.KEY_plus, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_IN")
+
+            # KP_1
+            ret = self._simulate_key(Gdk.KEY_KP_1)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_OUT")
+            self.win.core.zoom_video.assert_called_with(-0.05)
+
+            # Shift + Alt + - / Shift + Alt + underscore
+            ret = self._simulate_key(Gdk.KEY_minus, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_OUT")
+
+            ret = self._simulate_key(Gdk.KEY_underscore, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_OUT")
+
+        # 5. Verify existing Alt + KP_* window-resizing shortcuts are preserved
+        with patch.object(self.win, "resize") as mock_resize:
+            ret = self._simulate_key(Gdk.KEY_KP_1, Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_resize.assert_called_once()  # 50% window size
+
+            mock_resize.reset_mock()
+            ret = self._simulate_key(Gdk.KEY_KP_2, Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_resize.assert_called_once()  # 100% window size
+
+            mock_resize.reset_mock()
+            ret = self._simulate_key(Gdk.KEY_KP_4, Gdk.ModifierType.MOD1_MASK)
+            self.assertTrue(ret)
+            mock_resize.assert_called_once()  # 200% window size
+
+        # 6. Verify existing Ctrl + Alt + Left/Right 5-minute seeks are preserved
+        self._simulate_key(Gdk.KEY_Left, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)
+        self.win.core.seek_relative.assert_called_with(-300.0)
+        self._simulate_key(Gdk.KEY_Right, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)
+        self.win.core.seek_relative.assert_called_with(300.0)
+
+        # 7. Text input immunity
+        entry = Gtk.Entry()
+        with patch.object(self.win, "get_focus", return_value=entry):
+            event = MagicMock()
+            event.keyval = Gdk.KEY_KP_8
+            event.state = 0
+            self.assertFalse(self.win._on_key_press(self.win, event))
+
+        # 8. Fullscreen and windowed functionality
+        self.win.is_fullscreen = True
+        ret = self._simulate_key(Gdk.KEY_KP_8)
+        self.assertTrue(ret)
+        self.win.is_fullscreen = False
+        ret = self._simulate_key(Gdk.KEY_KP_8)
+        self.assertTrue(ret)
 
 
 class TestWindowLifecycleAndInteraction(unittest.TestCase):

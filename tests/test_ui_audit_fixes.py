@@ -157,20 +157,20 @@ class TestTranslatorThreadSafety(unittest.TestCase):
         translator = SubtitleTranslator()
         errors = []
 
-        def worker(thread_id):
-            try:
-                for i in range(100):
-                    text = f"line_{i % 10}"
-                    with patch.object(translator, "_translate_google", return_value=f"translated_{text}"):
+        with patch.object(translator, "_translate_google", side_effect=lambda text, *args, **kwargs: f"translated_{text}"):
+            def worker(thread_id):
+                try:
+                    for i in range(100):
+                        text = f"line_{i % 10}"
                         translator.translate(text, "en", "es")
-            except Exception as e:
-                errors.append(e)
+                except Exception as e:
+                    errors.append(e)
 
-        threads = [threading.Thread(target=worker, args=(t,)) for t in range(5)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+            threads = [threading.Thread(target=worker, args=(t,)) for t in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
 
         self.assertEqual(len(errors), 0, f"Thread safety errors occurred: {errors}")
 
