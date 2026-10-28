@@ -80,6 +80,7 @@ def parse_arguments(argv: list) -> dict:
         "contents": [],
         "filedlg": False,
         "urldlg": False,
+        "torrentdlg": False,
         "folderdlg": False,
         "simple": False,
         "cap": False,
@@ -137,6 +138,7 @@ def parse_arguments(argv: list) -> dict:
                 print("Options:")
                 print("  /filedlg             Open file selection dialog at startup")
                 print("  /urldlg              Open URL stream dialog at startup")
+                print("  /torrentdlg          Open BitTorrent / Magnet streaming dialog at startup")
                 print("  /folderdlg           Open folder dialog at startup")
                 print("  /clipboard           Open and play URL/path from system clipboard")
                 print("  /new                 Force a new player instance")
@@ -153,6 +155,8 @@ def parse_arguments(argv: list) -> dict:
                 options["filedlg"] = True
             elif sw == "urldlg":
                 options["urldlg"] = True
+            elif sw == "torrentdlg":
+                options["torrentdlg"] = True
             elif sw == "folderdlg":
                 options["folderdlg"] = True
             elif sw == "simple":
@@ -311,6 +315,8 @@ def main():
         win.handle_command("CMD_OPEN_FOLDER")
     elif options["urldlg"]:
         win.handle_command("CMD_OPEN_URL")
+    elif options.get("torrentdlg"):
+        win.handle_command("CMD_OPEN_TORRENT")
     elif options.get("clipboard"):
         win.handle_command("CMD_OPEN_CLIPBOARD")
 

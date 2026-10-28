@@ -32,6 +32,8 @@ from video.shader_manager import VideoShaderManager
 from video.capture import MediaCaptureManager
 from subtitle.subtitle_manager import SubtitleManager
 from subtitle.translator import SubtitleTranslator
+from torrent.manager import TorrentStreamManager
+from ui.torrent_dialog import TorrentStreamDialog
 
 
 class JonakiMainWindow(Gtk.Window):
@@ -66,6 +68,7 @@ class JonakiMainWindow(Gtk.Window):
         self.translator = SubtitleTranslator()
         self.skin = PotSkinEngine()
         self.osd = OSDOverlay()
+        self.torrent_manager = TorrentStreamManager()
 
         # Playback playlist queue
         self.playlist: List[Dict[str, Any]] = []
@@ -222,7 +225,15 @@ class JonakiMainWindow(Gtk.Window):
             if uri.startswith("file://"):
                 path = unquote(uri[7:])
                 if os.path.exists(path):
+                    if path.lower().endswith(".torrent"):
+                        self._open_torrent_dialog(initial_source=path)
+                        context.finish(True, False, time_val)
+                        return
                     files.append(path)
+            elif uri.startswith("magnet:"):
+                self._open_torrent_dialog(initial_source=uri)
+                context.finish(True, False, time_val)
+                return
             elif uri.startswith("http://") or uri.startswith("https://"):
                 files.append(uri)
 
@@ -530,6 +541,9 @@ class JonakiMainWindow(Gtk.Window):
             return True
         if ctrl and keyval in (Gdk.KEY_u, Gdk.KEY_U):
             self._open_url_dialog()
+            return True
+        if ctrl and keyval in (Gdk.KEY_m, Gdk.KEY_M):
+            self._open_torrent_dialog()
             return True
         if ctrl and keyval in (Gdk.KEY_v, Gdk.KEY_V) and not alt:
             self._open_from_clipboard()
@@ -985,6 +999,8 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id == "CMD_MEDIA_CLOSE":
             self._save_current_position()
             self.core.stop()
+            if hasattr(self, "torrent_manager") and self.torrent_manager:
+                self.torrent_manager.stop_session()
         elif cmd_id == "ID_PLAYBACK_5SEC_BACK":
             self.core.seek_relative(-5.0)
             self.osd.show_osd("Seek: -5 sec")
@@ -999,6 +1015,8 @@ class JonakiMainWindow(Gtk.Window):
             self._open_folder_dialog()
         elif cmd_id == "CMD_OPEN_URL":
             self._open_url_dialog()
+        elif cmd_id in ("CMD_OPEN_TORRENT", "ID_OPEN_TORRENT"):
+            self._open_torrent_dialog()
         elif cmd_id == "CMD_OPEN_SCREEN_CAPTURE":
             self.play_file("avdevice://lavfi:x11grab")
             self.osd.show_osd("Screen Capture Device")
@@ -1422,6 +1440,14 @@ class JonakiMainWindow(Gtk.Window):
         self.osd.show_osd(f"AI Subtitle Translation: {'ON' if active else 'OFF'}")
 
     def play_file(self, file_path: str, seek_pts: float = 0.0, sub_file: Optional[str] = None, audio_file: Optional[str] = None) -> None:
+        if file_path.startswith("magnet:") or file_path.lower().endswith(".torrent"):
+            self._open_torrent_dialog(initial_source=file_path)
+            return
+
+        if hasattr(self, "torrent_manager") and self.torrent_manager and self.torrent_manager.is_streaming:
+            if file_path != self.torrent_manager.stream_url:
+                self.torrent_manager.stop_session()
+
         if self.core.wid is None:
             self._pending_playback = (file_path, seek_pts, sub_file, audio_file)
             self.set_title(f"Jonaki - {os.path.basename(file_path)}")
@@ -1548,6 +1574,25 @@ class JonakiMainWindow(Gtk.Window):
                 self.add_files_to_playlist([url], auto_play=True)
         dialog.destroy()
 
+    def _open_torrent_dialog(self, initial_source: Optional[str] = None) -> None:
+        dialog = TorrentStreamDialog(
+            parent=self,
+            manager=self.torrent_manager,
+            on_start_playback=self._on_torrent_stream_started,
+            initial_source=initial_source,
+        )
+        dialog.run()
+        dialog.destroy()
+
+    def _on_torrent_stream_started(self, stream_url: str, title: str) -> None:
+        display_title = f"[Torrent] {title}"
+        self.add_files_to_playlist([stream_url], auto_play=True, clear_existing=True)
+        if self.playlist and self.current_index >= 0:
+            self.playlist[self.current_index]["title"] = display_title
+            self.playlist_window.update_playlist(self.playlist)
+        self.set_title(f"Jonaki - {display_title}")
+        self.osd.show_osd(f"Streaming Torrent: {title}")
+
     def _open_from_clipboard(self) -> None:
         text = None
         try:
@@ -1583,20 +1628,28 @@ class JonakiMainWindow(Gtk.Window):
 
         text = text.strip().strip('"').strip("'")
 
-        # 1. Check for URL (streaming, YouTube, RTSP, HTTP/HTTPS, HLS, DASH, etc.)
-        url_schemes = ("http://", "https://", "rtsp://", "rtmp://", "mms://", "magnet:", "ytdl://", "udp://", "tcp://")
+        # 1. Check for Magnet URI
+        if text.startswith("magnet:"):
+            self._open_torrent_dialog(initial_source=text)
+            return
+
+        # 2. Check for URL (streaming, YouTube, RTSP, HTTP/HTTPS, HLS, DASH, etc.)
+        url_schemes = ("http://", "https://", "rtsp://", "rtmp://", "mms://", "ytdl://", "udp://", "tcp://")
         if any(text.startswith(scheme) for scheme in url_schemes):
             self.add_files_to_playlist([text], auto_play=True, clear_existing=True)
             self.osd.show_osd(f"Playing from Clipboard: {text[:45]}...")
             return
 
-        # 2. Check for local file path or file:// URI
+        # 3. Check for local file path or file:// URI
         target_path = text
         if target_path.startswith("file://"):
             from urllib.parse import unquote
             target_path = unquote(target_path[7:])
 
         if os.path.exists(target_path):
+            if target_path.lower().endswith(".torrent"):
+                self._open_torrent_dialog(initial_source=target_path)
+                return
             sub_exts = ('.srt', '.ass', '.ssa', '.vtt', '.smi', '.sub')
             if target_path.lower().endswith(sub_exts):
                 self.core.load_subtitle(target_path)
@@ -1657,6 +1710,8 @@ class JonakiMainWindow(Gtk.Window):
             self._click_timer_id = None
         if hasattr(self, "mpris") and self.mpris:
             self.mpris.stop()
+        if hasattr(self, "torrent_manager") and self.torrent_manager:
+            self.torrent_manager.stop_session()
         self._save_current_position()
         self.core.stop_engine()
         if Gtk.main_level() > 0:

@@ -35,6 +35,7 @@ class PotContextMenu:
         self._add_action(open_menu, "Open File(s)... \tCtrl+O", "CMD_OPEN_FILE")
         self._add_action(open_menu, "Open Clipboard / Stream \tCtrl+V", "CMD_OPEN_CLIPBOARD")
         self._add_action(open_menu, "Open URL... \tCtrl+U", "CMD_OPEN_URL")
+        self._add_action(open_menu, "Open Torrent / Magnet... \tCtrl+M", "CMD_OPEN_TORRENT")
         self._add_action(open_menu, "Open Folder... \tF2", "CMD_OPEN_FOLDER")
         self._add_separator(open_menu)
         self._add_action(open_menu, "Open Screen Capture", "CMD_OPEN_SCREEN_CAPTURE")

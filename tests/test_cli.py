@@ -115,6 +115,13 @@ class TestJonakiCLI(unittest.TestCase):
         self.assertEqual(opts["title"], "Custom Title")
         self.assertEqual(opts["config"], "Cinema")
 
+    def test_torrent_switches(self):
+        magnet = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709&dn=test"
+        args = ["jonaki", "/torrentdlg", magnet]
+        opts = parse_arguments(args)
+        self.assertTrue(opts["torrentdlg"])
+        self.assertIn(magnet, opts["contents"])
+
 
 if __name__ == "__main__":
     unittest.main()
