@@ -154,8 +154,8 @@ sudo pacman -S --needed \
 Run the included installation script to link the launcher binaries and register desktop entries, MIME types, and high-resolution icons into `~/.local/`:
 
 ```bash
-git clone https://github.com/ashik-himel/JonakiPlayer.git # or your target clone URL
-cd PotPlayer
+git clone https://github.com/ashik60/JonakiPlayer.git
+cd JonakiPlayer
 chmod +x install.sh
 ./install.sh
 ```

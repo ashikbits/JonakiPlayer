@@ -45,8 +45,8 @@ EOF
 chmod +x "$DESKTOP_FILE"
 echo "[+] Installed desktop entry to $DESKTOP_FILE"
 
-# Optional legacy desktop file pointer
-ln -sf "$DESKTOP_FILE" "$HOME/.local/share/applications/potplayer.desktop"
+# Ensure no duplicate legacy desktop file exists (keywords in jonaki.desktop already match 'potplayer')
+rm -f "$HOME/.local/share/applications/potplayer.desktop"
 
 # 5. Update desktop and MIME databases
 if command -v update-desktop-database >/dev/null 2>&1; then
