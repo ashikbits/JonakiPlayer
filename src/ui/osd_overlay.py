@@ -29,11 +29,12 @@ class OSDOverlay:
         return self.show_tech_info
 
     def render(self, cr: cairo.Context, window_width: int, window_height: int,
-               media_info: Dict[str, Any], position_sec: float, duration_sec: float) -> None:
+               media_info: Dict[str, Any], position_sec: float, duration_sec: float,
+               skip_transient_osd: bool = False) -> None:
         now = time.time()
 
         # 1. Transient OSD Notification (Top Left)
-        if self.message and now < self.message_expire_time:
+        if not skip_transient_osd and self.message and now < self.message_expire_time:
             cr.save()
             cr.select_font_face("Segoe UI", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
             cr.set_font_size(18.0)

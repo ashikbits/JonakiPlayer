@@ -310,15 +310,15 @@ yt-dlp -o - -f best "https://www.youtube.com/watch?v=..." | jonaki -
 
 ### Video Frame Scaling & Zoom
 
-| Keybinding (Numpad) | Keybinding (Laptop Alt) | Action |
+| Keybinding (Numpad) | Keybinding (Laptop / Non-Numpad Alt) | Action |
 | :--- | :--- | :--- |
 | `KP_8` | `Shift+Alt+Up` | Increase Video Height (+5%) |
 | `KP_2` | `Shift+Alt+Down` | Decrease Video Height (-5%) |
 | `KP_6` | `Shift+Alt+Right` | Increase Video Width (+5%) |
 | `KP_4` | `Shift+Alt+Left` | Decrease Video Width (-5%) |
-| `KP_5` | `Shift+Alt+0` | Reset Video Dimensions & Zoom (100%) |
-| `KP_9` | `Shift+Alt+=` | Video Zoom In (+5%) |
-| `KP_1` | `Shift+Alt+-` | Video Zoom Out (-5%) |
+| `KP_5` | `Shift+Alt+0` / `Alt+0` / `Ctrl+Alt+0` | Reset Video Dimensions & Zoom (100%) |
+| `KP_9` / `KP_+` | `Shift+Alt+=` / `Alt+=` / `Ctrl+Alt+=` | Video Zoom In (+5%) |
+| `KP_1` / `KP_-` | `Shift+Alt+-` / `Alt+-` / `Ctrl+Alt+-` | Video Zoom Out (-5%) |
 
 ### Video Colors & ProcAmp Adjustments
 

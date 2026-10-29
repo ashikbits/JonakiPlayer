@@ -301,8 +301,14 @@ class JonakiMainWindow(Gtk.Window):
                 self._last_sub_text = ""
 
         # Dynamic overlay layer visibility: Only display osd_layer when idle (for logo)
-        # or when Tab Tech HUD or translated subtitle or OSD message is requested.
-        show_overlay = has_hud or has_sub or is_idle or has_osd
+        # or when Tab Tech HUD or translated subtitle is requested during playback.
+        # Transient OSD messages during active playback are handled by mpv's native GPU OSD
+        # to prevent X11/XWayland subwindow clipping, buffer clearing, and frame flickering.
+        is_active_playback = bool(self.core.state in (PlaybackState.PLAYING, PlaybackState.PAUSED) and self.core.current_file)
+        if is_active_playback:
+            show_overlay = has_hud or has_sub
+        else:
+            show_overlay = has_hud or has_sub or is_idle or has_osd
         if show_overlay:
             if not self.osd_layer.get_visible():
                 self.osd_layer.show()
@@ -368,7 +374,8 @@ class JonakiMainWindow(Gtk.Window):
             "aspect": self.core.video_aspect or "16:9",
             "fps": self.core.video_fps if self.core.video_fps > 0 else 60.0
         }
-        self.osd.render(cr, w, h, info, self.core.position, self.core.duration)
+        is_active = bool(self.core.state in (PlaybackState.PLAYING, PlaybackState.PAUSED) and self.core.current_file)
+        self.osd.render(cr, w, h, info, self.core.position, self.core.duration, skip_transient_osd=is_active)
 
     def _on_draw_skin_area(self, widget, cr: cairo.Context):
         alloc = widget.get_allocation()
@@ -601,7 +608,7 @@ class JonakiMainWindow(Gtk.Window):
                 self.toggle_fullscreen()
             return True
 
-        # Video Frame Scaling & Zoom Shortcuts (Alternative: Shift + Alt + Arrows / 0 / = / -)
+        # Video Frame Scaling & Zoom Shortcuts (Alternative: Shift + Alt + Arrows)
         if shift and alt and not ctrl:
             if keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
                 self.handle_command("CMD_VIDEO_SCALE_HEIGHT_UP")
@@ -615,17 +622,41 @@ class JonakiMainWindow(Gtk.Window):
             if keyval in (Gdk.KEY_Left, Gdk.KEY_KP_Left):
                 self.handle_command("CMD_VIDEO_SCALE_WIDTH_DOWN")
                 return True
-            if keyval in (Gdk.KEY_0, Gdk.KEY_KP_0, Gdk.KEY_KP_Insert, Gdk.KEY_parenright):
-                self.handle_command("CMD_VIDEO_SCALE_RESET")
-                return True
-            if keyval in (Gdk.KEY_equal, Gdk.KEY_plus, Gdk.KEY_KP_Equal, Gdk.KEY_KP_Add):
+
+        # Video Frame Zoom In:
+        # - Alternative: Shift + Alt + =/+, Alt + =/+, Ctrl + Alt + =/+
+        # - Numpad: KP_9 (NumLock ON), KP_Add, KP_Equal
+        is_zoom_in_key = keyval in (Gdk.KEY_equal, Gdk.KEY_plus, Gdk.KEY_KP_Equal, Gdk.KEY_KP_Add)
+        if is_zoom_in_key:
+            if (shift and alt and not ctrl) or (alt and not ctrl and not shift) or (ctrl and alt):
                 self.handle_command("CMD_VIDEO_ZOOM_IN")
                 return True
-            if keyval in (Gdk.KEY_minus, Gdk.KEY_underscore, Gdk.KEY_KP_Subtract):
+            if keyval in (Gdk.KEY_KP_Add, Gdk.KEY_KP_Equal) and not ctrl:
+                self.handle_command("CMD_VIDEO_ZOOM_IN")
+                return True
+
+        # Video Frame Zoom Out:
+        # - Alternative: Shift + Alt + -/_, Alt + -/_, Ctrl + Alt + -/_
+        # - Numpad: KP_1 (NumLock ON), KP_Subtract
+        is_zoom_out_key = keyval in (Gdk.KEY_minus, Gdk.KEY_underscore, Gdk.KEY_KP_Subtract)
+        if is_zoom_out_key:
+            if (shift and alt and not ctrl) or (alt and not ctrl and not shift) or (ctrl and alt):
+                self.handle_command("CMD_VIDEO_ZOOM_OUT")
+                return True
+            if keyval == Gdk.KEY_KP_Subtract and not ctrl:
                 self.handle_command("CMD_VIDEO_ZOOM_OUT")
                 return True
 
-        # Video Frame Scaling & Zoom Shortcuts (Numpad: KP_8, KP_2, KP_6, KP_4, KP_5, KP_9, KP_1)
+        # Video Frame Reset Dimensions:
+        # - Alternative: Shift + Alt + 0/), Alt + 0, Ctrl + Alt + 0
+        # - Numpad: KP_5, KP_Begin
+        is_reset_key = keyval in (Gdk.KEY_0, Gdk.KEY_KP_0, Gdk.KEY_KP_Insert, Gdk.KEY_parenright)
+        if is_reset_key:
+            if (shift and alt and not ctrl) or (alt and not ctrl and not shift) or (ctrl and alt):
+                self.handle_command("CMD_VIDEO_SCALE_RESET")
+                return True
+
+        # Video Frame Scaling & Zoom Shortcuts (Numpad with NumLock: KP_8, KP_2, KP_6, KP_4, KP_5, KP_9, KP_1)
         if not (ctrl or alt or shift):
             if keyval == Gdk.KEY_KP_8:
                 self.handle_command("CMD_VIDEO_SCALE_HEIGHT_UP")

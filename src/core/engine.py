@@ -660,6 +660,8 @@ class JonakiCore:
         Incrementally scale video height independently.
         Clamped between 0.2 (20%) and 3.0 (300%).
         """
+        if self.get_property("keepaspect") == "no":
+            self.set_property("keepaspect", "yes")
         self.video_scale_y = round(max(0.2, min(3.0, self.video_scale_y + delta)), 2)
         self.set_property("video-scale-y", f"{self.video_scale_y:.2f}")
         return self.video_scale_y
@@ -669,6 +671,8 @@ class JonakiCore:
         Incrementally scale video width independently.
         Clamped between 0.2 (20%) and 3.0 (300%).
         """
+        if self.get_property("keepaspect") == "no":
+            self.set_property("keepaspect", "yes")
         self.video_scale_x = round(max(0.2, min(3.0, self.video_scale_x + delta)), 2)
         self.set_property("video-scale-x", f"{self.video_scale_x:.2f}")
         return self.video_scale_x
@@ -678,6 +682,8 @@ class JonakiCore:
         Incrementally zoom video while preserving aspect ratio.
         Clamped between 0.2 (20%) and 4.0 (400%).
         """
+        if self.get_property("keepaspect") == "no":
+            self.set_property("keepaspect", "yes")
         self.video_zoom = round(max(0.2, min(4.0, self.video_zoom + delta)), 2)
         log2_zoom = math.log2(self.video_zoom)
         self.set_property("video-zoom", f"{log2_zoom:.4f}")
@@ -693,6 +699,7 @@ class JonakiCore:
         self.set_property("video-scale-x", "1.00")
         self.set_property("video-scale-y", "1.00")
         self.set_property("video-zoom", "0.00")
+        self.set_property("keepaspect", "yes")
 
     def toggle_hwdec(self) -> None:
         preferred = getattr(self, "_preferred_hwdec", "auto-safe")

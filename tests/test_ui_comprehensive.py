@@ -577,6 +577,33 @@ class TestKeyboardShortcuts(unittest.TestCase):
             self.assertTrue(ret)
             mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_OUT")
 
+            # Alternative and numpad key tests for zoom in: Alt+=, Ctrl+Alt+=, KP_Add
+            self._simulate_key(Gdk.KEY_equal, Gdk.ModifierType.MOD1_MASK)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_IN")
+
+            self._simulate_key(Gdk.KEY_equal, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_IN")
+
+            self._simulate_key(Gdk.KEY_KP_Add)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_IN")
+
+            # Alternative and numpad key tests for zoom out: Alt+-, Ctrl+Alt+-, KP_Subtract
+            self._simulate_key(Gdk.KEY_minus, Gdk.ModifierType.MOD1_MASK)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_OUT")
+
+            self._simulate_key(Gdk.KEY_minus, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_OUT")
+
+            self._simulate_key(Gdk.KEY_KP_Subtract)
+            mock_cmd.assert_called_with("CMD_VIDEO_ZOOM_OUT")
+
+            # Alternative key tests for reset: Alt+0, Ctrl+Alt+0
+            self._simulate_key(Gdk.KEY_0, Gdk.ModifierType.MOD1_MASK)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_RESET")
+
+            self._simulate_key(Gdk.KEY_0, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)
+            mock_cmd.assert_called_with("CMD_VIDEO_SCALE_RESET")
+
         # 5. Verify existing Alt + KP_* window-resizing shortcuts are preserved
         with patch.object(self.win, "resize") as mock_resize:
             ret = self._simulate_key(Gdk.KEY_KP_1, Gdk.ModifierType.MOD1_MASK)
@@ -598,6 +625,48 @@ class TestKeyboardShortcuts(unittest.TestCase):
         self.win.core.seek_relative.assert_called_with(-300.0)
         self._simulate_key(Gdk.KEY_Right, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)
         self.win.core.seek_relative.assert_called_with(300.0)
+
+    def test_TC_KEY_20_scaling_overlay_visibility_and_zero_flicker(self):
+        """TC-KEY-20: Ensure osd_layer stays hidden during active playback on scaling/zoom to prevent flickering."""
+        # 1. Active playback: osd_layer should remain hidden when OSD messages are shown
+        self.win.core.state = PlaybackState.PLAYING
+        self.win.core.current_file = "/media/test.mp4"
+        self.win.osd.show_tech_info = False
+        self.win.osd.translated_sub = ""
+
+        # Trigger scaling shortcut and tick UI
+        self.win.handle_command("CMD_VIDEO_ZOOM_IN")
+        self.win._on_ui_tick()
+        self.assertFalse(self.win.osd_layer.get_visible(),
+                         "osd_layer must remain hidden during active playback to prevent black-screen flicker")
+
+        self.win.handle_command("CMD_VIDEO_SCALE_HEIGHT_UP")
+        self.win._on_ui_tick()
+        self.assertFalse(self.win.osd_layer.get_visible(),
+                         "osd_layer must remain hidden during height scaling")
+
+        self.win.handle_command("CMD_VIDEO_SCALE_RESET")
+        self.win._on_ui_tick()
+        self.assertFalse(self.win.osd_layer.get_visible(),
+                         "osd_layer must remain hidden during scaling reset")
+
+        # 2. When Tab Tech HUD is active, osd_layer should show
+        self.win.osd.toggle_tech_info()
+        self.win._on_ui_tick()
+        self.assertTrue(self.win.osd_layer.get_visible(),
+                        "osd_layer should be visible when Tab Tech HUD is enabled")
+
+        self.win.osd.toggle_tech_info()
+        self.win._on_ui_tick()
+        self.assertFalse(self.win.osd_layer.get_visible(),
+                         "osd_layer should hide when Tab Tech HUD is closed")
+
+        # 3. When idle, osd_layer should show for Jonaki logo
+        self.win.core.state = PlaybackState.IDLE
+        self.win.core.current_file = None
+        self.win._on_ui_tick()
+        self.assertTrue(self.win.osd_layer.get_visible(),
+                        "osd_layer should be visible when idle to draw Jonaki logo")
 
         # 7. Text input immunity
         entry = Gtk.Entry()
