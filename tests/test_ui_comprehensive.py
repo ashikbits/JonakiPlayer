@@ -998,6 +998,73 @@ class TestSecondaryDialogsAndContextMenus(unittest.TestCase):
         self.assertTrue(any("Horizontal Flip" in l for l in orient_labels))
         self.assertTrue(any("Vertical Flip" in l for l in orient_labels))
 
+    def test_TC_CTX_03_context_menu_freshly_started(self):
+        """TC-CTX-03: Context menu opens when right-clicked on freshly started player."""
+        win = self.win
+        win.show_all()
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+
+        # Confirm player is freshly started (IDLE, no current file)
+        self.assertEqual(win.core.state, PlaybackState.IDLE)
+        self.assertIsNone(win.core.current_file)
+
+        # 1. Right-click on video_area
+        win.context_menu.menu.popdown()
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+        ev_video = Gdk.EventButton()
+        ev_video.type = Gdk.EventType.BUTTON_PRESS
+        ev_video.button = 3
+        ev_video.time = 0
+        ev_video.x = 200.0
+        ev_video.y = 200.0
+        handled = win._on_video_button_press(win.video_area, ev_video)
+        self.assertTrue(handled)
+        self.assertTrue(win.context_menu.menu.get_visible())
+
+        # 2. Right-click on osd_layer (the overlay visible on fresh start)
+        win.context_menu.menu.popdown()
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+        ev_osd = Gdk.EventButton()
+        ev_osd.type = Gdk.EventType.BUTTON_PRESS
+        ev_osd.button = 3
+        ev_osd.time = 0
+        ev_osd.x = 200.0
+        ev_osd.y = 200.0
+        handled_osd = win._on_video_button_press(win.osd_layer, ev_osd)
+        self.assertTrue(handled_osd)
+        self.assertTrue(win.context_menu.menu.get_visible())
+
+        # 3. Right-click on bottom skin_area
+        win.context_menu.menu.popdown()
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+        ev_skin = Gdk.EventButton()
+        ev_skin.type = Gdk.EventType.BUTTON_PRESS
+        ev_skin.button = 3
+        ev_skin.time = 0
+        ev_skin.x = 200.0
+        ev_skin.y = 10.0
+        handled_skin = win._on_skin_button_press(win.skin_area, ev_skin)
+        self.assertTrue(handled_skin)
+        self.assertTrue(win.context_menu.menu.get_visible())
+
+        # 4. Right-click on toplevel window
+        win.context_menu.menu.popdown()
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+        ev_win = Gdk.EventButton()
+        ev_win.type = Gdk.EventType.BUTTON_PRESS
+        ev_win.button = 3
+        ev_win.time = 0
+        ev_win.x = 10.0
+        ev_win.y = 10.0
+        handled_win = win._on_window_button_press(win, ev_win)
+        self.assertTrue(handled_win)
+        self.assertTrue(win.context_menu.menu.get_visible())
+
     def test_TC_OSD_01_osd_notifications_and_hud(self):
         """TC-OSD-01: OSD notifications and Technical HUD rendering."""
         osd = OSDOverlay()

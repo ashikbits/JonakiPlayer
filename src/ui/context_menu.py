@@ -343,13 +343,22 @@ class PotContextMenu:
 
     def popup(self, event: Optional[Any] = None, core: Optional[Any] = None) -> None:
         if core is not None:
-            self.refresh_dynamic_menus(core)
-        if event is not None and hasattr(self.menu, "popup_at_pointer"):
             try:
-                self.menu.popup_at_pointer(event)
-                return
+                self.refresh_dynamic_menus(core)
             except Exception:
                 pass
+        self.menu.show_all()
         button = event.button if (event and hasattr(event, "button")) else 0
         time_val = event.time if (event and hasattr(event, "time")) else Gtk.get_current_event_time()
-        self.menu.popup(None, None, None, None, button, time_val)
+        popped = False
+        has_win = event is not None and getattr(event, "window", None) is not None
+        if has_win and hasattr(self.menu, "popup_at_pointer"):
+            try:
+                self.menu.popup_at_pointer(event)
+                popped = self.menu.get_visible()
+            except Exception:
+                popped = False
+        if not popped:
+            self.menu.popup(None, None, None, None, button, time_val)
+
+

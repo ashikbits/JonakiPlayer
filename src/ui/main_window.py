@@ -129,6 +129,12 @@ class JonakiMainWindow(Gtk.Window):
             self.osd_layer.set_visual(rgba)
         self.osd_layer.set_app_paintable(True)
         self.osd_layer.connect("draw", self._on_draw_video_area)
+        self.osd_layer.connect("realize", self._on_osd_realize)
+        self.osd_layer.add_events(video_events)
+        self.osd_layer.connect("button-press-event", self._on_video_button_press)
+        self.osd_layer.connect("scroll-event", self._on_video_scroll)
+        self.osd_layer.connect("motion-notify-event", self._on_mouse_motion)
+        self.osd_layer.connect("enter-notify-event", self._on_mouse_motion)
         self.video_overlay.add_overlay(self.osd_layer)
         self.video_overlay.set_overlay_pass_through(self.osd_layer, True)
         self.main_box.pack_start(self.video_overlay, True, True, 0)
@@ -155,11 +161,13 @@ class JonakiMainWindow(Gtk.Window):
         self.playlist_window = PlaylistWindow(self)
         self.media_info_dialog = MediaInfoDialog(self)
 
-        # Window events (also listen on toplevel so any mouse activity unhides cursor)
+        # Window events (also listen on toplevel so any mouse activity unhides cursor and handles right click)
         self.add_events(Gdk.EventMask.POINTER_MOTION_MASK |
-                        Gdk.EventMask.ENTER_NOTIFY_MASK)
+                        Gdk.EventMask.ENTER_NOTIFY_MASK |
+                        Gdk.EventMask.BUTTON_PRESS_MASK)
         self.connect("motion-notify-event", self._on_mouse_motion)
         self.connect("enter-notify-event", self._on_mouse_motion)
+        self.connect("button-press-event", self._on_window_button_press)
         self.connect("window-state-event", self._on_window_state_event)
         self.connect("key-press-event", self._on_key_press)
         self.connect("destroy", self._on_destroy)
@@ -212,6 +220,15 @@ class JonakiMainWindow(Gtk.Window):
                 self.play_file(fp, seek_pts=pts)
         elif len(self.playlist) > 0 and self.current_index >= 0:
             self.play_index(self.current_index)
+
+    def _on_osd_realize(self, widget):
+        gdk_win = widget.get_window()
+        if gdk_win and hasattr(gdk_win, "set_pass_through"):
+            try:
+                gdk_win.set_pass_through(True)
+            except Exception:
+                pass
+
 
     def _on_drag_data_received(self, widget, context, x, y, data, info, time_val):
         uris = data.get_uris()
@@ -435,8 +452,20 @@ class JonakiMainWindow(Gtk.Window):
                     return False
                 self._click_timer_id = GLib.timeout_add(250, _do_click)
         elif event.button == 3:
+            if self._click_timer_id:
+                GLib.source_remove(self._click_timer_id)
+                self._click_timer_id = None
             self.context_menu.popup(event, self.core)
         return True
+
+    def _on_window_button_press(self, widget, event):
+        if event.button == 3:
+            if self._click_timer_id:
+                GLib.source_remove(self._click_timer_id)
+                self._click_timer_id = None
+            self.context_menu.popup(event, self.core)
+            return True
+        return False
 
     def _on_video_scroll(self, widget, event):
         if event.direction == Gdk.ScrollDirection.UP:
@@ -457,6 +486,12 @@ class JonakiMainWindow(Gtk.Window):
 
     def _on_skin_button_press(self, widget, event):
         self._on_mouse_motion(widget, event)
+        if event.button == 3:
+            if self._click_timer_id:
+                GLib.source_remove(self._click_timer_id)
+                self._click_timer_id = None
+            self.context_menu.popup(event, self.core)
+            return True
         is_playing = (self.core.state == PlaybackState.PLAYING)
         hit = self.skin.hit_test(int(event.x), int(event.y), is_playing=is_playing)
         if hit:
