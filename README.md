@@ -25,6 +25,61 @@ Jonaki implements the established control paradigms and workflow patterns of Pot
 
 ---
 
+## Key Features
+
+### 🧲 BitTorrent & Magnet Video Streaming
+* **Instant Playback Without Full Downloads:** Stream videos directly from Magnet links (`magnet:?xt=urn:btih:...`) or `.torrent` files with near-instant playback initiation.
+* **Local HTTP Loopback Bridge:** Built-in loopback streaming server translates RFC 7233 byte-range seek requests directly into BitTorrent piece requests.
+* **Sequential Piece Prioritization & Deadline Scheduling:** Automatically prioritizes file header metadata and video keyframe pieces first, followed by a sliding window buffer ahead of the current playback position for buffer-free scrubbing.
+* **Integrated Torrent Dialog (`Ctrl+M` / `/torrentdlg`):** Live swarm dashboard displaying connected peers, seeds, real-time download/upload transfer rates, piece buffer progress bars, and multi-file torrent selection.
+
+### 🔊 Audio Hardening & DSP Enhancement Suite
+* **10-Band Graphic Equalizer (`F7`):** Precision frequency response shaping across 31 Hz to 16 kHz with +/- 12 dB range, accompanied by genre presets (Pop, Rock, Classical, Jazz, Club, Vocal, Techno, Full Bass, Soft).
+* **Audio Enhancement (Speech Clarity & Loudness) (`Shift+E`):** PotPlayer-style dynamic acoustic expansion with specialized profiles:
+  * *Off (Bit-Perfect):* Transparent passthrough.
+  * *Gentle / Low (+3 dB):* Subtle dynamic lift.
+  * *Balanced / Default (+5 dB):* Standard full-spectrum audio boost.
+  * *Dialogue Focus (+5.5 dB):* Center speech band amplification and background compression.
+  * *Dynamic / High (+7.5 dB):* High-impact cinema presence.
+* **Auto Volume Control (AVC / Normalizer) (`Shift+N`):** Look-ahead limiter and RMS compressor that balances whisper-quiet dialogue and thunderous action sequences without audio clipping.
+* **Volume Boost PreAmp (`Shift+Up` / `Shift+Down`):** Clean pre-amplification boost up to +24 dB for low-level media tracks.
+* **Precision Audio Delay Sync (`Shift+[` / `Shift+]`):** Millisecond-accurate audio/video synchronization adjustments in 50 ms steps with instant reset (`Shift+\`).
+
+### 💬 Dual Subtitles, AI Translation & Online Search
+* **Simultaneous Dual Subtitles:** Render primary subtitles along the bottom and secondary subtitles at the top (or custom positions) concurrently with independent stream selection (`S` / `Shift+S`).
+* **Real-Time AI Subtitle Translation (`Alt+T`):** Live translation of foreign-language subtitles powered by cloud APIs (DeepL, Google) or local LLM runtimes (Ollama, LM Studio, vLLM via REST).
+* **Online Subtitle Downloader (`Ctrl+Alt+S`):** Integrated OpenSubtitles search with automatic media hash verification and keyword queries.
+* **Broad Subtitle Format Support:** Native parsing and rendering of ASS/SSA (with full typography and vector shapes), SRT, VTT, SMI, SUP (Blu-ray PGS), IDX/SUB, and synchronized LRC lyrics.
+* **Interactive Adjustments:** Subtitle timing sync offset (`[` / `]`, `Alt+Left` / `Alt+Right`), font size scaling (`Alt+PgUp` / `Alt+PgDn`), vertical positioning (`Alt+Up` / `Alt+Down`), and visibility toggling (`Alt+H`).
+
+### 🎬 Video Engine, Shaders & Hardware Acceleration
+* **Zero-Copy Hardware Video Acceleration:** Direct GPU decoding via VA-API (Intel/AMD), NVDEC (NVIDIA), VDPAU, and Vulkan Video up to 8K 60fps with negligible CPU usage.
+* **HDR to SDR Tone-Mapping:** High-fidelity HDR10 and HLG color-volume conversion to SDR displays via `libplacebo` algorithms (BT.2390, Reinhard, Mobius, Hable).
+* **GLSL Pixel Shaders:** Real-time post-processing shaders including 3x3 Sharpen, Adaptive Sharpen, and Denoise filters.
+* **Motion-Adaptive Deinterlacing (`Ctrl+F11`):** High-quality broadcast stream deinterlacing (`bwdif`, `yadif`, and hardware deinterlacing).
+* **Deband Filter (`Ctrl+B`):** Eliminates 8-bit color banding and posterization artifacts in flat gradients and dark scenes.
+* **ProcAmp Color Adjustments:** Instant hardware color controls for Brightness (`W`/`E`), Contrast (`R`/`T`), Saturation (`Y`/`U`), and Hue (`I`/`O`) with one-key reset (`Q`).
+* **Video Frame Scaling & Zoom:** Interactive aspect ratio preservation, Pan & Scan, stretch-to-fit (`Ctrl+Enter`), 90° video rotation (`Alt+K`), mirror / invert flips (`Ctrl+Z`, `Ctrl+X`), and frame dimension scaling (`KP_8`/`KP_2`/`KP_6`/`KP_4`/`KP_5`/`KP_9`/`KP_1` or `Shift+Alt+Arrows`).
+
+### 📸 Media Capture & Creation Studio
+* **High-Resolution Frame Snapshots:** Save pristine full-resolution frames directly to disk (`Ctrl+P`) or via save dialog (`Ctrl+E`).
+* **Clipboard Frame Copy (`Ctrl+C`):** Instantly copy the current video frame into the system clipboard for sharing in chat, documents, or image editors.
+* **Animated GIF & WebP Creator (`Ctrl+Alt+G`):** Export lightweight animated clips from video segments with dual-pass palette generation for optimal color quality.
+* **Storyboard Contact Sheet Generator:** Automatically construct a high-density thumbnail matrix sheet complete with video technical metadata and timecode stamps.
+* **Live Ingestion:** Stream and display desktop screens (`Ctrl+S`) or webcam/V4L2 hardware capture devices (`Ctrl+J`).
+
+### 🎨 Authentic Cairo DSF Skin Engine & Desktop UX
+* **Native PotPlayer DSF Skin Support:** In-process Cairo unpacker that loads authentic `.dsf` skins and renders 9-slice button surfaces, active hover/pressed button states, progress timebars, and volume slider strips.
+* **PotPlayer Right-Click Context Menu:** Exhaustive context menu matching PotPlayer's menu tree with dynamic audio/subtitle stream binding, aspect ratio presets, shader toggles, and panel dialogs.
+* **Technical Playback Information HUD (`Tab`):** In-GPU OSD overlay displaying container bitrate, video/audio codecs, display aspect ratio, output FPS, dropped frame counters, and active hardware decoder status.
+* **Playlist Window (`F8` / `F12`):** Multi-album tabbed playlist manager with drag-and-drop file ingestion, automatic directory scanning, smart alphanumeric sorting, and search.
+* **Quick Control Box (`F6`):** Tabbed floating adjustment dialog consolidating Audio Equalizer, Video ProcAmp, Subtitle configuration, and Playback speed controls.
+* **Smart Persistence:** SQLite backend (`mediadb.sqlite`) that automatically remembers resume positions, track selections, and bookmarks (`P`, `H`, `J`) across restarts.
+* **Seamless A-B Repeat Loop (`Ctrl+[` / `Ctrl+]` / `Ctrl+\`):** High-precision video segment looping.
+* **System Integration:** MPRIS2 D-Bus service (`org.mpris.MediaPlayer2.jonaki`) for system media keys and desktop environments, combined with single-instance IPC coordination (`/current`, `/new`).
+
+---
+
 ## Architecture & Technical Design
 
 ### 1. In-Process C-FFI Core Engine
@@ -86,6 +141,7 @@ sudo pacman -S --needed \
 ```
 
 ### Optional Utilities
+* `python3-libtorrent` (or `pip install libtorrent`): Enables high-performance BitTorrent and Magnet URI video streaming (`Ctrl+M` / `/torrentdlg`).
 * `yt-dlp`: Enables playback of arbitrary streaming URLs (YouTube, Vimeo, Twitch, HLS/DASH).
 * `wl-clipboard` (Wayland) / `xclip` (X11): Enables URL and file path ingestion directly from the system clipboard (`/clipboard` or `Ctrl+U`).
 
@@ -154,8 +210,12 @@ jonaki /path/to/video.mkv /seek=00:15:30
 # Specify external subtitles and audio tracks
 jonaki movie.mp4 /sub="commentary.srt" /aud="alternate.m4a" /volume=75
 
-# Open file dialog at launch
+# Stream directly from a Magnet URI or torrent file
+jonaki "magnet:?xt=urn:btih:..."
+
+# Open file or torrent dialog at launch
 jonaki /filedlg
+jonaki /torrentdlg
 
 # Force a standalone secondary process instead of delegating to existing instance
 jonaki /new video.mp4
@@ -168,52 +228,184 @@ yt-dlp -o - -f best "https://www.youtube.com/watch?v=..." | jonaki -
 
 | Parameter | Description |
 | :--- | :--- |
-| `[file / url / folder]` | Path or URL to enqueue and play immediately |
+| `[file / url / folder]` | Path, URL, or Magnet URI to enqueue and play immediately |
 | `/seek=hh:mm:ss.ms` | Jump to specified timestamp upon opening |
 | `/sub="path.srt"` | Load external subtitle file |
 | `/aud="path.m4a"` | Load external audio stream |
 | `/volume=0..100` | Set initial volume output |
 | `/filedlg` | Open file chooser dialog on startup |
+| `/folderdlg` | Open folder chooser dialog on startup |
 | `/urldlg` | Open network stream entry dialog on startup |
+| `/torrentdlg` | Open BitTorrent & Magnet streaming dialog on startup |
 | `/clipboard` | Ingest and play media URL or local path from clipboard |
 | `/new` | Force a new application process instance |
 | `/current` | Delegate playback to running primary instance (default) |
 | `-` | Read media stream from standard input (`stdin`) |
 | `--help`, `-h`, `/?` | Display command-line parameter help |
 
+
 ---
 
 ## Keybindings Reference
 
+### Playback & Playlist Navigation
+
 | Keybinding | Action |
 | :--- | :--- |
 | `Space` | Toggle Playback (Play / Pause) |
-| `Enter` | Toggle Fullscreen |
-| `Ctrl+Enter` | Toggle Stretch-to-Window / Keep Aspect Ratio |
+| `F4` | Stop Playback / Close Current File |
+| `Escape` | Exit Fullscreen (if in fullscreen) / Stop Playback |
+| `Page Down` / `KP_Page_Down` | Play Next item in playlist |
+| `Page Up` / `KP_Page_Up` | Play Previous item in playlist |
+| `D` or `.` (Period) or `>` | Frame Step Forward (+1 frame) |
+| `F` or `,` (Comma) or `<` | Frame Step Backward (-1 frame) |
+
+### Seeking & Jump Intervals
+
+| Keybinding | Action |
+| :--- | :--- |
 | `Left` / `Right` | Seek backward / forward 5 seconds |
 | `Ctrl+Left` / `Ctrl+Right` | Seek backward / forward 30 seconds |
-| `Shift+Left` / `Shift+Right` | Seek backward / forward 60 seconds |
+| `Shift+Left` / `Shift+Right` | Seek backward / forward 1 minute (60 sec) |
+| `Ctrl+Alt+Left` / `Ctrl+Alt+Right` | Seek backward / forward 5 minutes (300 sec) |
+
+### Playback Speed
+
+| Keybinding | Action |
+| :--- | :--- |
+| `Z` | Reset Playback Speed to normal (1.0x) |
+| `X` | Decrease Playback Speed (-0.1x) |
+| `C` | Increase Playback Speed (+0.1x) |
+
+### File, Stream & Device Ingestion
+
+| Keybinding | Action |
+| :--- | :--- |
+| `Ctrl+O` / `F3` | Open Media File(s) dialog |
+| `Ctrl+U` | Open Streaming URL dialog |
+| `Ctrl+M` | Open BitTorrent / Magnet stream dialog |
+| `Ctrl+V` | Open Media URL or file path from Clipboard |
+| `F2` | Open Folder dialog |
+| `Ctrl+S` | Open Screen Capture stream |
+| `Ctrl+J` | Open Webcam / Video Device |
+
+### Video Window, Aspect Ratio & Geometry
+
+| Keybinding | Action |
+| :--- | :--- |
+| `Enter` / `KP_Enter` | Toggle Fullscreen |
+| `Ctrl+Enter` | Toggle Stretch Video (Fit Window/Screen) / Keep Aspect Ratio |
+| `V` | Cycle Aspect Ratio modes (Auto, 16:9, 4:3, 2.35:1, 1.85:1) |
+| `Ctrl+T` | Toggle Always on Top (Stay on top) |
+| `Alt+1` / `Alt+KP_1` | Window Preset: 50% (0.5x original resolution) |
+| `Alt+2` / `Alt+KP_2` | Window Preset: 100% (1.0x original resolution) |
+| `Alt+3` / `Alt+KP_3` | Window Preset: 150% (1.5x original resolution) |
+| `Alt+4` / `Alt+KP_4` | Window Preset: 200% (2.0x original resolution) |
+| `Alt+K` | Rotate Video 90° Clockwise |
+| `Ctrl+Z` | Toggle Horizontal Flip (Mirror) |
+| `Ctrl+X` | Toggle Vertical Flip (Invert) |
+| `Ctrl+B` | Toggle Deband filter |
+| `Ctrl+F11` | Toggle Deinterlacing filter |
+| `Ctrl+H` | Toggle HDR Tone-Mapping |
+
+### Video Frame Scaling & Zoom
+
+| Keybinding (Numpad) | Keybinding (Laptop Alt) | Action |
+| :--- | :--- | :--- |
+| `KP_8` | `Shift+Alt+Up` | Increase Video Height (+5%) |
+| `KP_2` | `Shift+Alt+Down` | Decrease Video Height (-5%) |
+| `KP_6` | `Shift+Alt+Right` | Increase Video Width (+5%) |
+| `KP_4` | `Shift+Alt+Left` | Decrease Video Width (-5%) |
+| `KP_5` | `Shift+Alt+0` | Reset Video Dimensions & Zoom (100%) |
+| `KP_9` | `Shift+Alt+=` | Video Zoom In (+5%) |
+| `KP_1` | `Shift+Alt+-` | Video Zoom Out (-5%) |
+
+### Video Colors & ProcAmp Adjustments
+
+| Keybinding | Action |
+| :--- | :--- |
+| `Q` | Reset Video Colors (Brightness, Contrast, Saturation, Hue) |
+| `W` / `E` | Brightness adjust (-1% / +1%) |
+| `R` / `T` | Contrast adjust (-1% / +1%) |
+| `Y` / `U` | Saturation adjust (-1% / +1%) |
+| `I` / `O` | Hue adjust (-1° / +1°) |
+
+### Audio Controls, Equalizer & Sync
+
+| Keybinding | Action |
+| :--- | :--- |
 | `Up` / `Down` | Volume increment / decrement (+/- 2%) |
 | `M` | Toggle Audio Mute |
+| `Shift+Up` | Volume Boost PreAmp (+1 dB, up to +24 dB) |
+| `Shift+Down` | Volume Boost PreAmp (-1 dB, down to 0 dB) |
 | `Shift+N` | Toggle Auto Volume Normalizer (AVC) |
+| `Shift+E` | Toggle Audio Enhancement (Loudness & Speech boost) |
+| `A` | Cycle Audio Stream / Track |
+| `Shift+[` | Audio Sync adjust (-50 ms / -0.05s) |
+| `Shift+]` | Audio Sync adjust (+50 ms / +0.05s) |
+| `Shift+\` | Reset Audio Sync to 0 ms |
+
+### Subtitles & Dual Subtitle Tracks
+
+| Keybinding | Action |
+| :--- | :--- |
+| `S` | Cycle Primary Subtitle Track |
 | `Shift+S` | Cycle Secondary Subtitle Track (Dual Subtitles) |
+| `Alt+O` | Open / Load Subtitle File |
+| `Alt+H` | Toggle Subtitle Visibility (Show / Hide) |
 | `[` / `]` | Subtitle Sync adjust (-0.5s / +0.5s) |
-| `Shift+[` / `Shift+]` | Audio Sync adjust (-0.05s / +0.05s) |
-| `Tab` | Toggle Technical Information Overlay (In-GPU HUD) |
+| `\` | Reset Subtitle Sync (0.0s) |
+| `Alt+Left` / `Alt+Right` | Subtitle Sync adjust (-0.5s / +0.5s) |
+| `Alt+/` | Reset Subtitle Sync (0.0s) |
+| `Alt+PgUp` / `Alt+PgDn` | Subtitle Font Size adjust (+2 pt / -2 pt) |
+| `Alt+Up` / `Alt+Down` | Subtitle Position adjust (Move Up / Down) |
+| `Alt+Home` | Reset Subtitle Position to default (100%) |
+| `Alt+T` | Toggle Real-Time AI Subtitle Translation |
+| `Ctrl+Alt+S` | Search Subtitles Online (OpenSubtitles hash & text search) |
+
+### A-B Repeat Loop & Bookmarks
+
+| Keybinding | Action |
+| :--- | :--- |
+| `Ctrl+[` | Set Repeat Point A (Loop start) |
+| `Ctrl+]` | Set Repeat Point B (Loop end) |
+| `Ctrl+\` | Clear A-B Repeat Loop |
+| `P` | Add Bookmark at current timestamp |
+| `H` | Jump to Previous Bookmark |
+| `J` | Jump to Next Bookmark |
+
+### Frame Capture & Recording
+
+| Keybinding | Action |
+| :--- | :--- |
+| `Ctrl+P` | Save Current Video Frame (Snapshot to default capture folder) |
+| `Ctrl+E` | Save Current Video Frame As... (file dialog prompt) |
+| `Ctrl+C` | Copy Current Video Frame to System Clipboard |
+| `Ctrl+Alt+G` | Create Animated GIF / WebP clip from video |
+
+### Dialogs, Panels & HUD
+
+| Keybinding | Action |
+| :--- | :--- |
+| `Tab` | Toggle Technical Playback Info Overlay (In-GPU HUD) |
 | `Ctrl+F1` | Open Media & Stream Properties Report |
+| `F1` | Open About Jonaki Dialog |
+| `F5` | Open Preferences Dialog |
 | `F6` | Open Quick Control Box (Equalizer, Video ProcAmp, Subtitles) |
 | `F7` | Open 10-Band Graphic Equalizer Window |
 | `F8` / `F12` | Toggle Playlist Window |
-| `Ctrl+Alt+S` | Search Subtitles Online |
-| `Ctrl+E` | Export Current Video Frame (Snapshot) |
-| `F1` | Open About Dialog |
-| `KP_8` / `Shift+Alt+Up` | Increase Video Height (+5%) |
-| `KP_2` / `Shift+Alt+Down` | Decrease Video Height (-5%) |
-| `KP_6` / `Shift+Alt+Right` | Increase Video Width (+5%) |
-| `KP_4` / `Shift+Alt+Left` | Decrease Video Width (-5%) |
-| `KP_5` / `Shift+Alt+0` | Reset Video Dimensions & Zoom (100%) |
-| `KP_9` / `Shift+Alt+=` | Video Zoom In (+5%) |
-| `KP_1` / `Shift+Alt+-` | Video Zoom Out (-5%) |
+
+### Mouse & Pointer Shortcuts
+
+| Interaction | Action |
+| :--- | :--- |
+| `Left Click` (Single) | Toggle Playback (Play / Pause) |
+| `Left Click` (Double) | Toggle Fullscreen |
+| `Right Click` | Open Context Menu (anywhere on video, logo, control bar, or window) |
+| `Mouse Scroll Up / Down` | Volume increment / decrement (+/- 2%) |
+| `Click & Drag on Timebar` | Seek to percentage position across timeline |
+| `Click & Drag on Volume Slider` | Set audio volume level |
+
 
 ---
 
