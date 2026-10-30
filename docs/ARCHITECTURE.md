@@ -1,16 +1,16 @@
-# Architecture Specification: PotPlayer for Linux
+# Architecture Specification: Jonaki for Linux
 
-This document outlines the architectural blueprint of **PotPlayer for Linux**, derived from reverse-engineering the Windows PotPlayer runtime binaries (`PotPlayer64.dll`, `ffcodec64.dll`, `ATextOut64.dll`, `MediaDB64.dll`) and mapping them onto modern Linux platform facilities.
+This document outlines the architectural blueprint of **Jonaki for Linux**, derived from reverse-engineering the Windows Jonaki runtime binaries (`Jonaki64.dll`, `ffcodec64.dll`, `ATextOut64.dll`, `MediaDB64.dll`) and mapping them onto modern Linux platform facilities.
 
 ---
 
 ## 1. High-Level Architectural Comparison
 
-Windows PotPlayer utilizes the legacy Microsoft DirectShow filter graph architecture supplemented by custom allocator-presenters and hardware wrappers. For Linux, we establish an equivalent high-performance modular pipeline:
+Windows Jonaki utilizes the legacy Microsoft DirectShow filter graph architecture supplemented by custom allocator-presenters and hardware wrappers. For Linux, we establish an equivalent high-performance modular pipeline:
 
 ```mermaid
 flowchart TD
-    subgraph Windows_PotPlayer ["Windows Architecture (Reverse-Engineered)"]
+    subgraph Windows_Jonaki ["Windows Architecture (Reverse-Engineered)"]
         W_SRC["CBaseDemuxer / CFFmpegSourceFilter"] --> W_PARSER["CFFmpegParserFilter / CMatroskaParserFilter"]
         W_PARSER --> W_VDEC["CFFmpegDecodeVideo / CDXVA2SampleD3D"]
         W_PARSER --> W_ADEC["CFFmpegDecodeAudio / CBassSourceFilter"]
@@ -22,7 +22,7 @@ flowchart TD
         W_UI["Custom Win32 Skin Engine (DSF / GDI / Direct2D)"] --> W_VRENDER
     end
 
-    subgraph Linux_PotPlayer ["Linux Architecture (PotPlayer Clone)"]
+    subgraph Linux_Jonaki ["Linux Architecture (Jonaki Clone)"]
         L_SRC["Demuxer: GStreamer / FFmpeg / HLS / DASH / Stdin"] --> L_CORE["Playback Core Engine (In-Process GStreamer playbin)"]
         L_CORE --> L_VDEC["HW Decoding: VA-API / NVDEC / Vulkan Video"]
         L_CORE --> L_ADEC["Audio Decoders: libav / GStreamer"]
@@ -31,19 +31,19 @@ flowchart TD
         L_ADEC --> L_AFILTER["DSP: equalizer-10bands / volume / Dynamic Normalizer"]
         L_AFILTER --> L_ARENDER["Audio Output: autoaudiosink (PipeWire / PulseAudio / ALSA)"]
         L_SUB["Linux Subtitle Engine: GstTextOverlay + AI Translator"] --> L_VRENDER
-        L_UI["PotPlayer Skin Engine: DSF Parser + Cairo/GTK3 Compositor"] --> L_VRENDER
+        L_UI["Jonaki Skin Engine: DSF Parser + Cairo/GTK3 Compositor"] --> L_VRENDER
     end
 ```
 
 ---
 
-## 2. Reverse-Engineered Class Hierarchy (`PotPlayer64.dll`)
+## 2. Reverse-Engineered Class Hierarchy (`Jonaki64.dll`)
 
-Our binary extraction of `PotPlayer64.dll` revealed the core object model of PotPlayer. The table below documents each primary class, its Windows implementation, and the corresponding Linux class:
+Our binary extraction of `Jonaki64.dll` revealed the core object model of Jonaki. The table below documents each primary class, its Windows implementation, and the corresponding Linux class:
 
 | Windows Class (RTTI) | Description | Linux Implementation Component |
 | :--- | :--- | :--- |
-| `CGraphBuilderManagerPlayer` | Master media controller orchestrating playback | `PotPlayerCore` (`src/core/engine.py` - GStreamer) |
+| `CGraphBuilderManagerPlayer` | Master media controller orchestrating playback | `JonakiCore` (`src/core/engine.py` - GStreamer) |
 | `CBaseDemuxer` / `CFFmpegSourceFilter` | Demuxes multimedia containers (MKV, MP4, AVI, TS) | Native GStreamer demuxing pipeline (`playbin`) |
 | `CHlsDashParserFilter` / `CHlsDemuxer` | Adaptive bitrate network streaming (HLS, MPEG-DASH) | Native HLS/DASH network demuxing via `souphttpsrc` |
 | `AVCFFmpegDecodeVideo` | Video decompression filter (AVC, HEVC, VP9, AV1) | HW-accelerated `vaapi`, `nvdec`, `vulkan` |
@@ -55,7 +55,7 @@ Our binary extraction of `PotPlayer64.dll` revealed the core object model of Pot
 | `AVCCommonSkinLayout` | Skin parser, XML hierarchy, and coordinate mapper | `SkinEngine` (DSF ZIP extractor and layout) |
 | `AVCCommonSkinSlider` | Custom timebar and volume slider with markers | `PotSkinSlider` (A-B repeat, bookmarks) |
 | `CPlayListWnd` | Playlist window, history, and search | `PlaylistController` + SQLite3 storage |
-| `MediaDB64.dll` | Persistence layer for playback resumes and history | `MediaDatabase` (`~/.config/potplayer/db.sqlite`)|
+| `MediaDB64.dll` | Persistence layer for playback resumes and history | `MediaDatabase` (`~/.config/jonaki/db.sqlite`)|
 | `DaumCrashHandler64.dll` | Diagnostic logging and telemetry | Linux crash reporter and logging framework |
 
 ---
@@ -111,7 +111,7 @@ The audio subsystem provides ultra-low-latency playback, channel upmixing, and b
 
 ### 3.3 Skin & UI Compositor
 
-PotPlayer's signature visual identity relies on its `.dsf` skin format. The Linux clone implements a native DSF compositor:
+Jonaki's signature visual identity relies on its `.dsf` skin format. The Linux clone implements a native DSF compositor:
 
 1. **DSF Format Support**: Native decoding of `.dsf` archives (standard Deflate ZIP packages containing XML layout descriptors, `StringTable.txt`, and sprite atlases `Main.png`, `BRTool.png`, `Window.png`, `Control.png`).
 2. **Nine-Slice Sprite Blitting**: Accurate 9-slice image scaling preserving borders and corner radii for buttons, titlebars, background panels, and scrollbars.
@@ -125,7 +125,7 @@ PotPlayer's signature visual identity relies on its `.dsf` skin format. The Linu
 
 ### 3.4 Multi-Subtitle & Translation Engine
 
-PotPlayer features the most advanced subtitle engine of any consumer player. The Linux implementation replicates all capabilities:
+Jonaki features the most advanced subtitle engine of any consumer player. The Linux implementation replicates all capabilities:
 
 1. **Simultaneous Multi-Track Display**: Support for displaying Primary, Secondary, and Tertiary subtitles simultaneously at customizable screen locations (Top, Bottom, Center).
 2. **Real-Time Translation Pipeline**:
@@ -138,9 +138,9 @@ PotPlayer features the most advanced subtitle engine of any consumer player. The
 
 ### 3.5 Inter-Process Communication & Single-Instance Coordination
 
-To replicate Windows PotPlayer's `/new` and `/current` command-line behaviors:
+To replicate Windows Jonaki's `/new` and `/current` command-line behaviors:
 
-- A Unix Domain Socket (`$XDG_RUNTIME_DIR/potplayer_ipc.sock`) operates as the IPC coordinator.
+- A Unix Domain Socket (`$XDG_RUNTIME_DIR/jonaki_ipc.sock`) operates as the IPC coordinator.
 - When a new process is spawned:
   - If `/new` is specified, it creates a new independent player instance with an isolated IPC socket.
   - If `/current` or no flag is specified, it connects to the active instance socket, sends the command payload (e.g. `{"action": "open", "files": [...], "add_to_playlist": true}`), and terminates immediately.
@@ -148,9 +148,9 @@ To replicate Windows PotPlayer's `/new` and `/current` command-line behaviors:
 
 ### 3.6 Desktop Environment Integration
 
-PotPlayer for Linux integrates natively with Linux desktop environments (GNOME, KDE Plasma, XFCE, Cinnamon, Sway, Hyprland):
+Jonaki for Linux integrates natively with Linux desktop environments (GNOME, KDE Plasma, XFCE, Cinnamon, Sway, Hyprland):
 
 - **MPRIS2 D-Bus Interface**: Implements `org.mpris.MediaPlayer2` and `org.mpris.MediaPlayer2.Player` for system volume overlays, multimedia keys, notification controls, and lockscreen integration.
-- **XDG Desktop Standard**: Provides `potplayer.desktop` with MIME type associations for over 150 audio, video, and playlist file formats.
+- **XDG Desktop Standard**: Provides `jonaki.desktop` with MIME type associations for over 150 audio, video, and playlist file formats.
 - **System Tray**: Provides a system tray icon with playback controls and quick-access menu.
 - **Inhibit Screensaver**: Prevents screen sleep during video playback via `org.freedesktop.ScreenSaver` and Wayland idle-inhibit protocol.

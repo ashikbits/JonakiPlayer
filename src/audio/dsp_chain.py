@@ -31,7 +31,7 @@ ENHANCEMENT_PRESETS: Dict[str, Dict[str, Any]] = {
         "speech_eq": False,
     },
     "Balanced / Default": {
-        "gain_db": 5.0,   # Tuned PotPlayer enhancement default
+        "gain_db": 5.0,   # Tuned enhancement default
         "compressor": True,
         "comp_thresh": "-10dB",
         "comp_ratio": 2.5,
@@ -74,15 +74,15 @@ ENHANCEMENT_PRESETS: Dict[str, Dict[str, Any]] = {
 
 class AudioDSPChain:
     def __init__(self, enable_enhancement: bool = False):
-        # Audio Enhancement (PotPlayer-style loudness & speech boost)
+        # Audio Enhancement (loudness & speech boost)
         self.enhancement_enabled: bool = enable_enhancement
         self.enhancement_preset: str = "Balanced / Default"
         self.enhancement_gain_db: float = 5.0
 
-        # PotPlayer Audio Architecture - Clean bit-perfect defaults
+        # Audio Architecture - Clean bit-perfect defaults
         self.audio_boost_db: float = 0.0           # PreAmp boost default: 0 dB (neutral bit-perfect)
         self.ac3_dts_dialogue_boost: bool = False  # Disabled by default
-        self.normalizer_enabled: bool = False      # PotPlayer Auto Volume Control default: OFF (Shift+N)
+        self.normalizer_enabled: bool = False      # Auto Volume Control default: OFF (Shift+N)
         self.harmonic_booster_enabled: bool = False
         self.compressor_enabled: bool = False
         self.voice_isolation_mode: str = "none"    # "none", "remove_voice", "boost_voice"
@@ -118,7 +118,7 @@ class AudioDSPChain:
 
     def build_filter_chain(self, equalizer_filter_str: str = "") -> str:
         """
-        Builds the unified audio filter string replicating PotPlayer's high-gain audio engine:
+        Builds the unified audio filter string:
         Stage A: Moderate Gain (Enhancement + User PreAmp)
         Stage B: Dynamic Range Compressor (dialogue clarity, controlled crest factor)
         Stage C: True-Peak-Aware Lookahead Limiter (strict ceiling, zero clipping)
@@ -163,7 +163,7 @@ class AudioDSPChain:
         # 7. Stage A — Moderate Input Gain (Unified Enhancement Gain + User PreAmp Boost)
         enh_gain = self.enhancement_gain_db if self.enhancement_enabled else 0.0
         total_gain = enh_gain + self.audio_boost_db
-        if total_gain > 0.05:
+        if abs(total_gain) > 0.05:
             filters.append(f"volume={total_gain:.1f}dB")
 
         # 8. Stage B — Dynamic Range Compressor

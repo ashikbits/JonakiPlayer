@@ -81,6 +81,20 @@ class VideoShaderManager:
         """
         return ":".join(self.active_shaders)
 
+    def set_color(self, name: str, val: int) -> int:
+        clamped = max(-100, min(100, int(val)))
+        if name == "brightness":
+            self.brightness = clamped
+        elif name == "contrast":
+            self.contrast = clamped
+        elif name == "saturation":
+            self.saturation = clamped
+        elif name == "hue":
+            self.hue = clamped
+        elif name == "gamma":
+            self.gamma = clamped
+        return clamped
+
     def reset_colors(self) -> None:
         self.brightness = 0
         self.contrast = 0

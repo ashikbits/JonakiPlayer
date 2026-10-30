@@ -8,7 +8,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from core.engine import JonakiCore, PotPlayerCore, PlaybackState
+from core.engine import JonakiCore, PlaybackState
 
 
 class TestJonakiCore(unittest.TestCase):
@@ -17,9 +17,6 @@ class TestJonakiCore(unittest.TestCase):
 
     def tearDown(self):
         self.core.stop_engine()
-
-    def test_alias_compatibility(self):
-        self.assertIs(PotPlayerCore, JonakiCore)
 
     def test_pipeline_initialization(self):
         self.assertIsNotNone(self.core.handle)

@@ -13,16 +13,13 @@ for arg in "$@"; do
     fi
 done
 
-rm -f "$HOME/.local/bin/jonaki"
-rm -f "$HOME/.local/bin/potplayer"
-echo "[-] Removed $HOME/.local/bin/jonaki and potplayer symlinks"
+rm -f "$HOME/.local/bin/jonaki" 2>/dev/null || true
+echo "[-] Removed $HOME/.local/bin/jonaki launcher"
 
-rm -f "$HOME/.local/share/applications/jonaki.desktop"
-rm -f "$HOME/.local/share/applications/potplayer.desktop"
+rm -f "$HOME/.local/share/applications/jonaki.desktop" 2>/dev/null || true
 echo "[-] Removed desktop entries"
 
-rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/jonaki.png"
-rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/potplayer.png"
+rm -f "$HOME/.local/share/icons/hicolor/*/apps/jonaki.png" 2>/dev/null || true
 echo "[-] Removed application icons"
 
 # Clean up runtime IPC sockets and lockfiles

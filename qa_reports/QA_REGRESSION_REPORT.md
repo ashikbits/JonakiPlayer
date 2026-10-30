@@ -3,7 +3,7 @@
 **Document Version:** 1.0.0  
 **Date:** 2026-10-27  
 **Author:** Senior Software QA Engineer & Linux Desktop Application Tester  
-**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/PotPlayer`)  
+**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/Jonaki`)  
 **Commit Baseline:** `9743287`  
 **Host Environment:** Debian GNU/Linux 13 (Trixie), Kernel 6.12.113+deb13-amd64, x86_64  
 **Display Protocol:** Wayland / XWayland (`DISPLAY=:1`, `WAYLAND_DISPLAY=wayland-0`)  

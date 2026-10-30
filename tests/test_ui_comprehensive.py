@@ -1,5 +1,5 @@
 """
-Comprehensive automated test suite for Jonaki Player (PotPlayer Linux) UI & Navigation QA audit.
+Comprehensive automated test suite for Jonaki Player UI & Navigation QA audit.
 
 Scope:
 - Phase 2.C: User Interface and Controls (DSF skin buttons, sliders, keyboard shortcuts, window lifecycle,

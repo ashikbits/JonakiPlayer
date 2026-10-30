@@ -83,7 +83,7 @@ class MediaInfoDialog(Gtk.Window):
 
     def update_info(self, info: Dict[str, Any]) -> None:
         """
-        Formats comprehensive playback report matching PotPlayer's Ctrl+F1 text dump.
+        Formats comprehensive playback report matching the Ctrl+F1 text dump.
         """
         path = info.get("path") or "No file loaded"
         filesize = info.get("filesize_bytes") or 0
@@ -125,7 +125,9 @@ class MediaInfoDialog(Gtk.Window):
             dec_str = "Software Decoding (libavcodec / dav1d)"
 
         # Display Aspect Ratio
-        if w > 0 and h > 0:
+        if info.get("aspect"):
+            dar_str = str(info["aspect"])
+        elif w > 0 and h > 0:
             g = math.gcd(w, h)
             dar_str = f"{w // g}:{h // g}"
         else:

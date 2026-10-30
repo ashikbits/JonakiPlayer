@@ -261,6 +261,24 @@ class TestTorrentHttpBridgeWithMockEngine(unittest.TestCase):
             urllib.request.urlopen(req)
         self.assertEqual(ctx.exception.code, 404)
 
+    def test_special_characters_filename_stream_url(self):
+        special_path = os.path.join(self.temp_dir, "My Video #1 [1080p] & What? %20.mp4")
+        with open(special_path, "wb") as f:
+            f.write(self.test_payload)
+        self.mock_engine.get_selected_file_path.return_value = special_path
+        special_bridge = TorrentHttpBridge(engine=self.mock_engine, port=0)
+        url = special_bridge.start()
+        try:
+            self.assertIn("%231", url)  # '#' quoted
+            self.assertIn("%3F", url)   # '?' quoted
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req) as resp:
+                self.assertEqual(resp.status, 200)
+                data = resp.read()
+                self.assertEqual(data, self.test_payload)
+        finally:
+            special_bridge.stop()
+
 
 class TestTorrentStreamingEndToEndIntegration(unittest.TestCase):
     """
@@ -410,6 +428,31 @@ class TestTorrentDialogUI(unittest.TestCase):
         self.assertEqual(dialog.source_entry.get_text(), magnet)
         self.assertEqual(dialog.get_title(), "Open Torrent / Magnet Stream - Jonaki")
         dialog.destroy()
+
+    def test_dialog_stream_clicked_destroys_without_recursion(self):
+        import gi
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk
+        from ui.torrent_dialog import TorrentStreamDialog
+
+        manager = MagicMock(spec=TorrentStreamManager)
+        manager.start_streaming.return_value = "http://127.0.0.1:9999/stream/tok/video.mp4"
+        cb = MagicMock()
+        dialog = TorrentStreamDialog(
+            parent=None,
+            manager=manager,
+            on_start_playback=cb,
+            initial_source="test.torrent",
+        )
+        dialog._selected_file_idx = 0
+        dialog.liststore.append([0, "test.mp4", "100 MB", "100%", "Ready"])
+
+        # Trigger OK response as if user clicked Stream Video button
+        dialog._on_response(dialog, Gtk.ResponseType.OK)
+
+        # Must have called start_streaming and on_start_playback without re-entering
+        manager.start_streaming.assert_called_once_with(file_index=0)
+        cb.assert_called_once_with("http://127.0.0.1:9999/stream/tok/video.mp4", "test.mp4")
 
 
 class TestMainWindowTorrentIntegration(unittest.TestCase):

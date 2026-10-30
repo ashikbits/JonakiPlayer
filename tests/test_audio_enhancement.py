@@ -1,7 +1,7 @@
 """
 Jonaki Player - Audio Enhancement System Test Suite
 Verifies:
-- PotPlayer-style loudness enhancement pipeline (Gain -> Compressor -> Limiter)
+- Audio loudness enhancement pipeline (Gain -> Compressor -> Limiter)
 - Filter graph generation across all enhancement presets
 - No filter duplication or compounded volume stages
 - Safe bounded AVC normalizer interaction

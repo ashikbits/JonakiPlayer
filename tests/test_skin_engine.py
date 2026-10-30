@@ -1,5 +1,5 @@
 """
-Unit tests for PotPlayer DSF skin engine.
+Unit tests for DSF skin engine.
 """
 
 import unittest

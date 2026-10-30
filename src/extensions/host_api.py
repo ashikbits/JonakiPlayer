@@ -7,6 +7,7 @@ Executes AngelScript and Python media/subtitle extensions.
 import os
 import sys
 import time
+import tempfile
 import urllib.request
 import urllib.parse
 from typing import Dict, Any, Optional, List
@@ -68,7 +69,7 @@ class JonakiHostAPI:
         return self.extensions_dir
 
     def HostGetTempFolder(self) -> str:
-        return "/tmp"
+        return tempfile.gettempdir()
 
     def HostGetConfigFolder(self) -> str:
         return self.config_dir
@@ -82,6 +83,10 @@ class JonakiHostAPI:
     # --- Network APIs ---
 
     def HostUrlGetString(self, url: str, user_agent: str = "Jonaki", referer: str = "", headers_str: str = "") -> str:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme.lower() not in ("http", "https"):
+            print(f"[HostAPI] Blocked unsupported URL scheme: {parsed.scheme}")
+            return ""
         req = urllib.request.Request(url)
         if user_agent:
             req.add_header("User-Agent", user_agent)
@@ -100,6 +105,10 @@ class JonakiHostAPI:
             return ""
 
     def HostUrlPostData(self, url: str, post_data: str, user_agent: str = "Jonaki", referer: str = "", headers_str: str = "") -> str:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme.lower() not in ("http", "https"):
+            print(f"[HostAPI] Blocked unsupported URL scheme: {parsed.scheme}")
+            return ""
         data = post_data.encode("utf-8")
         req = urllib.request.Request(url, data=data, method="POST")
         if user_agent:
@@ -117,7 +126,3 @@ class JonakiHostAPI:
         except Exception as e:
             print(f"[HostAPI] HostUrlPostData failed: {e}")
             return ""
-
-
-# Backward compatibility alias
-PotPlayerHostAPI = JonakiHostAPI

@@ -1,7 +1,7 @@
-# PotPlayer for Linux — Project Audit
+# Jonaki for Linux — Project Audit
 
 **Audit date:** 2026-10-25  
-**Repository:** `/home/ashik/Data/Projects/PotPlayer`  
+**Repository:** `/home/ashik/Data/Projects/Jonaki`  
 **Snapshot:** 19 Python modules under `src/`, 5 test modules under `tests/`, 9 documents under `docs/`  
 **Scope:** source, tests, documentation, assets, packaging, legal/compliance, runtime behavior  
 **Constraint:** this audit changes no source code; it is a review document only.
@@ -34,17 +34,17 @@
 
 ## 1. Executive summary
 
-This repository is a **working X11 prototype of an mpv front-end with a PotPlayer-inspired skin**, not the “open-source, pixel-accurate, feature-complete clone” that `docs/README.md` describes. The basic path works: GTK 3 creates a window, mpv is embedded through `--wid` on X11, files can be queued, and a Cairo-drawn control bar provides playback and volume controls. The module layout is understandable, and several isolated components (equalizer, bookmark storage, capture helpers, IPC round-trip) are real implementations rather than mock-ups.
+This repository is a **working X11 prototype of an mpv front-end with a Jonaki-inspired skin**, not the “open-source, pixel-accurate, feature-complete clone” that `docs/README.md` describes. The basic path works: GTK 3 creates a window, mpv is embedded through `--wid` on X11, files can be queued, and a Cairo-drawn control bar provides playback and volume controls. The module layout is understandable, and several isolated components (equalizer, bookmark storage, capture helpers, IPC round-trip) are real implementations rather than mock-ups.
 
 The project is **not ready for users, distribution, or a public “release” description** in its current state:
 
-- **Absolute Linux file paths are silently discarded.** `potplayer /home/user/movie.mkv` is parsed as an unknown `/` switch and produces an empty playlist. This breaks the most common invocation and the example in the development guide.
+- **Absolute Linux file paths are silently discarded.** `jonaki /home/user/movie.mkv` is parsed as an unknown `/` switch and produces an empty playlist. This breaks the most common invocation and the example in the development guide.
 - **`/volume`, `/seek`, `/sub`, and `/aud` are applied before mpv exists.** The commands are sent to an unstarted engine and silently dropped. The same ordering problem affects every launch, not only delegated instances.
 - **Playlist advancement reacts to every `end-file` event**, including `stop`, `error`, and file replacement. Pressing F4 can advance to the next track; loading a replacement can skip items.
 - **Pure Wayland is not supported despite the documentation.** The code requires an X11 window ID and forces `GDK_BACKEND=x11` when `$DISPLAY` exists. On a Wayland-only session, mpv is launched without `--wid` and opens a separate window.
 - **Several visible controls call methods that do not exist.** The Control Box subtitle slider/checkbox and the playlist Remove/Sort/Shuffle buttons raise `AttributeError`. Most context-menu actions are no-ops.
 - **The documentation describes a different, much larger product.** GTK 4, Wayland/EGL, MPRIS2, Whisper, VapourSynth, AngelScript, multi-subtitle tracks, 34 shaders, AppImage/Flatpak/deb packaging, and many files do not exist in the repository.
-- **There is a serious legal mismatch.** The bundled PotPlayer EULA prohibits reverse engineering, decompilation, and modification; the repository redistributes proprietary Windows binaries, skins, and branding; it has no project license; and its About dialog attributes copyright to Kakao.
+- **There is a serious legal mismatch.** The bundled Jonaki EULA prohibits reverse engineering, decompilation, and modification; the repository redistributes proprietary Windows binaries, skins, and branding; it has no project license; and its About dialog attributes copyright to Kakao.
 
 **Bottom line:** treat this as a **pre-alpha prototype and a reverse-engineering notebook**, not a shippable player. Fix the P0 items first, then make the documentation match the code before adding features.
 
@@ -102,9 +102,9 @@ The problem is not a lack of ambition or structure. It is the gap between the do
 
 ### P0-1. Absolute Linux paths are parsed as switches and silently discarded
 
-**Where:** `src/potplayer.py:84-161`, especially the switch test at line 89 and the content fallback at lines 150-161.  
-**Evidence:** a probe of `parse_arguments(["potplayer", "/tmp/movie.mkv"])` returns `contents == []`. A relative path such as `movie.mkv` is accepted because it does not begin with `/`.  
-**Why it happens:** every argument beginning with `/` is treated as a PotPlayer Windows switch:
+**Where:** `src/jonaki.py:84-161`, especially the switch test at line 89 and the content fallback at lines 150-161.  
+**Evidence:** a probe of `parse_arguments(["jonaki", "/tmp/movie.mkv"])` returns `contents == []`. A relative path such as `movie.mkv` is accepted because it does not begin with `/`.  
+**Why it happens:** every argument beginning with `/` is treated as a Jonaki Windows switch:
 
 ```python
 if lower.startswith("/") or lower.startswith("--") or (...):
@@ -114,7 +114,7 @@ if lower.startswith("/") or lower.startswith("--") or (...):
 
 `/tmp/movie.mkv` becomes the unknown switch `tmp/movie.mkv`; no branch matches it, and there is no final “otherwise treat as content” fallback. The same applies to `/home/...`, `/media/...`, `/mnt/...`, and every other absolute POSIX path.
 
-**Impact:** the normal Linux invocation is broken, including the example in `docs/LINUX_DEVELOPMENT_GUIDE.md:132` (`python3 src/potplayer.py /path/to/video.mkv`). Desktop launchers and file managers generally pass absolute paths, so double-clicking a video can open an empty player.
+**Impact:** the normal Linux invocation is broken, including the example in `docs/LINUX_DEVELOPMENT_GUIDE.md:132` (`python3 src/jonaki.py /path/to/video.mkv`). Desktop launchers and file managers generally pass absolute paths, so double-clicking a video can open an empty player.
 
 **Recommendation:** classify content before switches. A safe order is:
 
@@ -127,10 +127,10 @@ Add a regression test for absolute paths, paths containing spaces, `file://` URI
 
 ### P0-2. Initial `/volume`, `/seek`, `/sub`, and `/aud` are applied before mpv starts and are dropped
 
-**Where:** `src/potplayer.py:188-200`; engine startup happens later in `src/ui/main_window.py:114-128`; `_send_command` returns immediately when the engine is not running (`src/core/engine.py:132-145`).  
+**Where:** `src/jonaki.py:188-200`; engine startup happens later in `src/ui/main_window.py:114-128`; `_send_command` returns immediately when the engine is not running (`src/core/engine.py:132-145`).  
 **Evidence:** the sequence in `main()` is:
 
-1. construct `PotPlayerMainWindow` (does not start mpv),
+1. construct `JonakiMainWindow` (does not start mpv),
 2. call `win.core.set_volume(...)`, `seek_absolute(...)`, `load_subtitle(...)`, `load_audio_track(...)`,
 3. start the IPC server,
 4. call `win.show_all()`, which triggers `_on_video_realize` and only then `start_engine()`.
@@ -152,7 +152,7 @@ Because `_is_running` is still false, every one of those commands is a no-op. Th
 
 ### P0-4. Pure Wayland launches an external mpv window or fails; Wayland support is only claimed in docs
 
-**Where:** `src/ui/main_window.py:114-124` (`get_xid()`), `src/potplayer.py:11-17` (forced `GDK_BACKEND=x11`), `src/core/engine.py:69-96` (`--vo=gpu,x11`, `--force-window=yes`, `--wid` only when available).  
+**Where:** `src/ui/main_window.py:114-124` (`get_xid()`), `src/jonaki.py:11-17` (forced `GDK_BACKEND=x11`), `src/core/engine.py:69-96` (`--vo=gpu,x11`, `--force-window=yes`, `--wid` only when available).  
 **Evidence:** `Gdk.Window.get_xid()` exists only for the X11 backend. On a Wayland-only session there is no `$DISPLAY`, so the re-exec does not run, `get_xid()` raises, `wid` remains `None`, and `start_engine()` launches mpv without `--wid`. Because `--force-window=yes` is set, mpv creates its own window; the GTK window remains a logo/control shell. With `--vo=gpu,x11` and no X server, mpv may fail to initialize at all.
 
 **Impact:** the application is not a Wayland player. On modern Fedora/Ubuntu Wayland sessions, users see either a detached video window or a blank player. The documentation repeatedly claims native Wayland/EGL support.
@@ -173,7 +173,7 @@ Add a smoke test that simulates no `DISPLAY` and asserts a deliberate, user-visi
 ### P1-1. A second `/new` instance deletes the primary instance’s IPC socket
 
 **Where:** `src/core/ipc.py:34-61` (`start()` returns `False` when another server is alive) and `src/core/ipc.py:86-98` (`stop()` unconditionally unlinks the path).  
-**Evidence:** the second process still constructs and shows a window even when `server.start()` returns `False`; the return value is ignored in `src/potplayer.py:216-217`. On exit, its `finally: server.stop()` removes `$XDG_RUNTIME_DIR/potplayer_ipc.sock` even though this process never bound it. A probe confirmed the path disappears while the first server is still alive.  
+**Evidence:** the second process still constructs and shows a window even when `server.start()` returns `False`; the return value is ignored in `src/jonaki.py:216-217`. On exit, its `finally: server.stop()` removes `$XDG_RUNTIME_DIR/jonaki_ipc.sock` even though this process never bound it. A probe confirmed the path disappears while the first server is still alive.  
 **Impact:** after one `/new` session exits, the original player can no longer receive delegated opens. The next normal launch fails `is_server_running()` and starts yet another process. This defeats single-instance behavior and can leave orphaned windows.
 
 **Recommendation:** track socket ownership (`self._owns_socket`) and unlink only when the server actually bound the path. Treat `start() == False` as “delegate to the existing process or run without IPC”, and never call `stop()` on a non-owner. Add a test that starts two servers, stops the second, and asserts the first can still answer a client.
@@ -234,7 +234,7 @@ The F5 “Preferences” key is also not handled in `_on_key_press`. The `CMD_CO
 ### P1-7. Documentation describes a different product and points at files that do not exist
 
 **Where:** `docs/README.md`, `docs/LINUX_DEVELOPMENT_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/FEATURES_SPECIFICATION.md`, `docs/CLI_AND_IPC_SPECIFICATION.md`, and related specs.  
-**Evidence:** the docs claim GTK 4 and libadwaita while the code requires GTK 3 (`src/potplayer.py:22`, `src/ui/main_window.py:10`). They describe `src/video/motion_interp.py`, `src/subtitle/whisper_stt.py`, `tests/test_skin.py`, `tests/test_subtitles.py`, `scripts/build_appimage.py`, a Flatpak manifest, and a debian packaging flow; none exist. They claim 34 shaders while `assets/shaders/` contains two `.hook` files. They describe MPRIS2, AngelScript, multi-subtitle tracks, Whisper STT, VapourSynth, 360°/3D, HDR tone mapping, recording, screen/webcam capture, and 100% CLI parity; the implementation has stubs, partial plumbing, or nothing. The development guide’s absolute-path example and test command both fail in the current code.
+**Evidence:** the docs claim GTK 4 and libadwaita while the code requires GTK 3 (`src/jonaki.py:22`, `src/ui/main_window.py:10`). They describe `src/video/motion_interp.py`, `src/subtitle/whisper_stt.py`, `tests/test_skin.py`, `tests/test_subtitles.py`, `scripts/build_appimage.py`, a Flatpak manifest, and a debian packaging flow; none exist. They claim 34 shaders while `assets/shaders/` contains two `.hook` files. They describe MPRIS2, AngelScript, multi-subtitle tracks, Whisper STT, VapourSynth, 360°/3D, HDR tone mapping, recording, screen/webcam capture, and 100% CLI parity; the implementation has stubs, partial plumbing, or nothing. The development guide’s absolute-path example and test command both fail in the current code.
 
 **Impact:** new contributors cannot trust the docs, reviewers cannot distinguish implemented from planned work, and users form false expectations. This is a P1 because documentation is the project’s main interface to contributors and because the claims affect legal/product positioning.
 
@@ -274,7 +274,7 @@ The F5 “Preferences” key is also not handled in `_on_key_press`. The `CMD_CO
 ### P2-4. The extension runtime does not exist; only a Host API façade is present
 
 **Where:** `src/extensions/host_api.py`; no imports of `extensions.host_api` in `src/`.  
-**Evidence:** `PotPlayerHostAPI` implements roughly 20 `Host*` methods, but there is no AngelScript VM, no Python plugin loader, no manifest discovery, no sandbox, no lifecycle, and no connection to playback or subtitles. The docs claim existing `.as` scripts can run unchanged via a VM or AST transpiler.
+**Evidence:** `JonakiHostAPI` implements roughly 20 `Host*` methods, but there is no AngelScript VM, no Python plugin loader, no manifest discovery, no sandbox, no lifecycle, and no connection to playback or subtitles. The docs claim existing `.as` scripts can run unchanged via a VM or AST transpiler.
 
 **Impact:** extension compatibility is entirely aspirational. The API façade also normalizes network access without any permission model, which would become a security problem once a loader exists.
 
@@ -285,7 +285,7 @@ The F5 “Preferences” key is also not handled in `_on_key_press`. The `CMD_CO
 **Where:** `src/ui/skin_engine.py:72-180`.  
 **Evidence:** it reads only `Main.png`, `BRTool.png`, `Window.png`, `Control.png`, and `Slider.png`; it never parses `BottomVideo.txt`, `Common.txt`, or any XML layout. Control rectangles, badge positions, and image coordinates are hard-coded in `_init_default_controls()` and `layout()`. The docstring and docs claim a 9-slice compositor, XML parser, and full DSF layout support. `WindowFrame.dsf` is unused, so the window is not actually borderless/custom-framed. Badge labels remain `HW`, `HDR`, `H264`, `AAC`, and `2.0` regardless of the media.
 
-**Impact:** the UI is “PotPlayer-inspired” rather than skin-compatible. It will not honor third-party skins, DPI variants, or layout changes, and the static badges misinform users.
+**Impact:** the UI is “Jonaki-inspired” rather than skin-compatible. It will not honor third-party skins, DPI variants, or layout changes, and the static badges misinform users.
 
 **Recommendation:** rename the current implementation to a built-in theme and state that DSF compatibility is partial. If DSF compatibility is a goal, parse the layout descriptors, implement 9-slice drawing, and validate against a corpus of skins. Drive badges from observed mpv properties. Handle HiDPI by loading 2x sprites or scaling surfaces.
 
@@ -300,7 +300,7 @@ The F5 “Preferences” key is also not handled in `_on_key_press`. The `CMD_CO
 
 ### P2-7. Many CLI switches are tokenized but never applied; documented POSIX aliases mostly do not parse
 
-**Where:** `src/potplayer.py:52-163`, `src/potplayer.py:166-217`.  
+**Where:** `src/jonaki.py:52-163`, `src/jonaki.py:166-217`.  
 **Evidence:** `/folderdlg`, `/simple`, `/cap`, `/cam`, `/dvd`, `/cd`, `/insert`, `/autoplay`, `/same`, `/sort`, `/randomize`, `/clipboard`, `/title`, `/user_agent`, `/referer`, `/headers`, and `/config` are parsed into `options` but never used. `/folderdlg` is not handled in the `filedlg`/`urldlg` block. The delegated IPC payload includes `sub` and `aud`, but the server handler ignores both. The documented POSIX forms `--file-dialog`, `--url-dialog`, `--folder-dialog`, `--screen-capture`, `--device-capture`, `--subtitle`, and `--audio` are not recognized because the parser expects `filedlg`, `sub=`, and so on.
 
 **Impact:** the CLI is far from the claimed “100% parity”. Users get silent acceptance of unsupported switches, which is worse than an error.
@@ -346,7 +346,7 @@ The F5 “Preferences” key is also not handled in `_on_key_press`. The `CMD_CO
 ### P2-12. The About dialog contains false attribution and a development URL
 
 **Where:** `src/ui/main_window.py:794-802`.  
-**Evidence:** it claims “Copyright (C) 2006-2026 Kakao Corp / Open Source Linux Clone” and links to `https://potplayer.tv`. This project is not Kakao’s and has no license.  
+**Evidence:** it claims “Copyright (C) 2006-2026 Kakao Corp / Open Source Linux Clone” and links to `https://jonaki.tv`. This project is not Kakao’s and has no license.  
 **Impact:** legal and reputational risk; users may believe the project is authorized by Kakao when the EULA explicitly restricts modification and redistribution.
 
 **Recommendation:** remove the Kakao copyright line, state the actual project authors and license (once chosen), add a disclaimer that the project is unaffiliated with Kakao/Daum, and link to the project’s own repository. This is covered further in the legal section.
@@ -375,7 +375,7 @@ The F5 “Preferences” key is also not handled in `_on_key_press`. The `CMD_CO
 
 ### P3-4. Dead code and unused imports obscure the real surface
 
-**Where:** examples include unused `math`/`os` imports, `subprocess`/`glob` in `src/potplayer.py`, unused `Gdk` in `src/ui/playlist_view.py`, unused `shutil` in `src/core/media_db.py`, and `MPRIS2Service` never imported. `src/core/engine.py` computes `media_info` callbacks that the main window never subscribes to.  
+**Where:** examples include unused `math`/`os` imports, `subprocess`/`glob` in `src/jonaki.py`, unused `Gdk` in `src/ui/playlist_view.py`, unused `shutil` in `src/core/media_db.py`, and `MPRIS2Service` never imported. `src/core/engine.py` computes `media_info` callbacks that the main window never subscribes to.  
 **Evidence:** the code’s advertised surface is larger than its executed surface, which makes review and testing harder.  
 **Recommendation:** remove dead imports/modules or wire them in. Enable `ruff` rule `F401`/`F841` and treat unused code as a design signal.
 
@@ -471,12 +471,12 @@ Legend: ✅ implemented and connected · 🟡 partial, fragile, or UI-only · �
 
 ### 9.1 Current shape
 
-The directory layout is sensible, but the runtime architecture is a star with `PotPlayerMainWindow` at the center:
+The directory layout is sensible, but the runtime architecture is a star with `JonakiMainWindow` at the center:
 
 ```mermaid
 flowchart TD
-    CLI["potplayer.py<br/>CLI + re-exec + IPC"] --> WIN["PotPlayerMainWindow<br/>~800 lines"]
-    WIN --> CORE["PotPlayerCore<br/>mpv process + JSON IPC"]
+    CLI["jonaki.py<br/>CLI + re-exec + IPC"] --> WIN["JonakiMainWindow<br/>~800 lines"]
+    WIN --> CORE["JonakiCore<br/>mpv process + JSON IPC"]
     WIN --> SKIN["PotSkinEngine<br/>DSF sprites + Cairo"]
     WIN --> PLAYLIST["PlaylistWindow"]
     WIN --> CTRL["ControlBoxDialog"]
@@ -497,7 +497,7 @@ flowchart TD
 
 | Module | Actual responsibility | Main concern |
 | :--- | :--- | :--- |
-| `src/potplayer.py` | CLI parsing, GDK re-exec, single-instance delegation, startup options, GTK loop, IPC server lifecycle | Startup ordering, absolute paths, many ignored switches |
+| `src/jonaki.py` | CLI parsing, GDK re-exec, single-instance delegation, startup options, GTK loop, IPC server lifecycle | Startup ordering, absolute paths, many ignored switches |
 | `src/core/engine.py` | Spawn mpv, JSON IPC, observers, transport, filters, A-B repeat, shutdown | State machine, thread safety, error handling |
 | `src/core/ipc.py` | Unix socket server/client, single-instance delegation | Socket ownership, framing, permissions |
 | `src/core/media_db.py` | SQLite schema and CRUD | Mostly unused by the app |
@@ -524,7 +524,7 @@ There are no `__init__.py` files under `src/` or `tests/`. The code relies on `s
 3. **The engine boundary is not a boundary.** Callbacks execute on the mpv listener thread and reach directly into widgets. The IPC server correctly uses `GLib.idle_add`, but the core listener does not.
 4. **Commands are defined three times.** Keyboard shortcuts are an `if/elif` chain, context-menu IDs are string literals, and skin buttons use a third set of IDs. There is no shared registry, so adding a menu item without a handler is easy and invisible.
 5. **Persistence is a library, not a service.** `MediaDatabase` is instantiated by the window but not used for session state. There is no save/restore lifecycle.
-6. **Side effects at construction.** `MediaDatabase()` creates `~/.config/potplayer`; `MediaCaptureManager()` creates `~/Pictures/PotPlayer`; `PotPlayerHostAPI()` creates extension directories even though it is never used. Constructing an object should not write to the user’s home directory.
+6. **Side effects at construction.** `MediaDatabase()` creates `~/.config/jonaki`; `MediaCaptureManager()` creates `~/Pictures/Jonaki`; `JonakiHostAPI()` creates extension directories even though it is never used. Constructing an object should not write to the user’s home directory.
 7. **No package boundary or dependency injection.** Tests must manipulate `sys.path`; widgets construct concrete collaborators; substituting a fake engine or clock is hard.
 
 ### 9.4 Proposed target architecture
@@ -532,7 +532,7 @@ There are no `__init__.py` files under `src/` or `tests/`. The code relies on `s
 A smaller, testable structure:
 
 ```text
-potplayer (entry point)
+jonaki (entry point)
 └── Application
     ├── CommandRegistry          # every CMD_*/ID_* -> Command(execute, enabled, checked)
     ├── UiDispatcher             # marshals worker events to the GTK main thread
@@ -551,7 +551,7 @@ Practical rules:
 - **One command table.** Menu, shortcuts, and skin buttons resolve through `CommandRegistry`. Add a startup assertion or test that every visible command exists and is enabled correctly.
 - **One persistence boundary.** Save position on pause/close at a throttled interval; restore it when opening a file; persist playlist and settings.
 - **One error boundary.** Engine, IPC, capture, and network failures become typed results/events that the UI can present, not `print()` calls.
-- **Package the code.** Add `src/potplayer/__init__.py` (or rename to a proper package), use relative imports, and expose a console entry point.
+- **Package the code.** Add `src/jonaki/__init__.py` (or rename to a proper package), use relative imports, and expose a console entry point.
 
 ### 9.5 Refactoring sequence that minimizes risk
 
@@ -579,15 +579,15 @@ The problem is that it is written in the present tense as if the design were imp
 | Claim | Document location | Actual state |
 | :--- | :--- | :--- |
 | “Open-source, pixel-accurate, feature-complete clone” | `docs/README.md:3` | No project license; large parts absent; not feature-complete. |
-| GTK 4 and libadwaita dependencies | `docs/README.md:24`; `docs/LINUX_DEVELOPMENT_GUIDE.md:18-20,38,50,151` | Code requires GTK 3 (`src/potplayer.py:22`, `src/ui/main_window.py:10`). |
+| GTK 4 and libadwaita dependencies | `docs/README.md:24`; `docs/LINUX_DEVELOPMENT_GUIDE.md:18-20,38,50,151` | Code requires GTK 3 (`src/jonaki.py:22`, `src/ui/main_window.py:10`). |
 | “34 shaders” | `docs/README.md:33`; `docs/PIXEL_SHADERS_AND_VAPOURSYNTH.md:22` | Two files: `sharpen.hook`, `adaptive_sharpen.hook`. |
 | Full MPRIS2 interface | `docs/CLI_AND_IPC_SPECIFICATION.md:104-130` | `core/mpris.py` is an unstarted stub. |
-| IPC actions: play, pause, seek, volume, mute, track cycle, snapshot, status | `docs/CLI_AND_IPC_SPECIFICATION.md:92-100` | Only `open` is handled (`src/potplayer.py:203-214`). |
+| IPC actions: play, pause, seek, volume, mute, track cycle, snapshot, status | `docs/CLI_AND_IPC_SPECIFICATION.md:92-100` | Only `open` is handled (`src/jonaki.py:203-214`). |
 | POSIX aliases such as `--file-dialog`, `--subtitle`, `--audio` | `docs/CLI_AND_IPC_SPECIFICATION.md:25-52` | The parser recognizes `filedlg`, `sub=`, `aud=`, not those aliases. |
 | Absolute-path example | `docs/LINUX_DEVELOPMENT_GUIDE.md:132` | Fails; absolute paths are discarded. |
 | `python3 -m unittest discover ...` | `docs/LINUX_DEVELOPMENT_GUIDE.md:143` | Fails when `$DISPLAY` is set and `GDK_BACKEND` is not `x11`; needs the workaround below. |
 | AppImage build script | `docs/LINUX_DEVELOPMENT_GUIDE.md:153` | `scripts/build_appimage.py` does not exist. |
-| Flatpak manifest | `docs/LINUX_DEVELOPMENT_GUIDE.md:157` | `io.github.potplayer_linux.PotPlayer.yml` does not exist. |
+| Flatpak manifest | `docs/LINUX_DEVELOPMENT_GUIDE.md:157` | `io.github.jonaki_linux.Jonaki.yml` does not exist. |
 | Debian package flow | `docs/LINUX_DEVELOPMENT_GUIDE.md:173` | No `debian/` directory or control files. |
 | Motion interpolation module | `docs/LINUX_DEVELOPMENT_GUIDE.md:95` | `src/video/motion_interp.py` does not exist. |
 | Whisper STT module | `docs/LINUX_DEVELOPMENT_GUIDE.md:101` | `src/subtitle/whisper_stt.py` does not exist. |
@@ -597,7 +597,7 @@ The problem is that it is written in the present tense as if the design were imp
 | AngelScript VM / unchanged `.as` scripts | `docs/EXTENSION_API_SPECIFICATION.md:12` | No VM, loader, or runtime. |
 | Multi-track subtitles, AI translation, Whisper STT | `docs/SUBTITLE_ENGINE_SPECIFICATION.md`; `docs/FEATURES_SPECIFICATION.md:53-60` | Metadata and unused clients only. |
 | DSF XML parsing and 9-slice rendering | `docs/SKIN_ENGINE_SPECIFICATION.md` | Fixed sprite list and hard-coded layout. |
-| Database path `~/.config/potplayer/db.sqlite` | `docs/ARCHITECTURE.md:58` | Actual path is `~/.config/potplayer/mediadb.sqlite`. |
+| Database path `~/.config/jonaki/db.sqlite` | `docs/ARCHITECTURE.md:58` | Actual path is `~/.config/jonaki/mediadb.sqlite`. |
 | 360°/3D, HDR, motion interpolation, recording, screen/webcam capture, word lookup | `docs/FEATURES_SPECIFICATION.md:27-31,56,60,86` | No implementation or UI handlers. |
 
 ### 10.3 Missing referenced files and directories
@@ -609,18 +609,18 @@ The development guide’s tree promises these, but they are absent:
 - `tests/test_skin.py`
 - `tests/test_subtitles.py`
 - `scripts/build_appimage.py`
-- `io.github.potplayer_linux.PotPlayer.yml`
+- `io.github.jonaki_linux.Jonaki.yml`
 - `debian/` packaging tree
-- `assets/icons/` (only `assets/logos/PotPlayer.png` exists)
+- `assets/icons/` (only `assets/logos/Jonaki.png` exists)
 - Any `__init__.py` package markers under `src/` or `tests/`
 
 ### 10.4 Broken documented commands
 
 ```bash
 # Broken: absolute path is parsed as an unknown switch.
-python3 src/potplayer.py /path/to/video.mkv
+python3 src/jonaki.py /path/to/video.mkv
 
-# Broken in a desktop session: importing potplayer.py re-execs Python with
+# Broken in a desktop session: importing jonaki.py re-execs Python with
 # sys.executable as the script argument when $DISPLAY is set.
 python3 -m unittest discover -s tests -p "test_*.py" -v
 
@@ -628,13 +628,13 @@ python3 -m unittest discover -s tests -p "test_*.py" -v
 GDK_BACKEND=x11 python3 -m unittest discover -s tests -p "test_*.py" -v
 
 # Missing script.
-python3 scripts/build_appimage.py --output PotPlayer-x86_64.AppImage
+python3 scripts/build_appimage.py --output Jonaki-x86_64.AppImage
 
 # No debian packaging tree.
 dpkg-buildpackage -us -uc -b
 ```
 
-The test failure is a code bug in the import-time re-exec guard (`src/potplayer.py:11-17`), not only a documentation bug. The guard should run only when the module is executed as the main program, and it should preserve `-m`/script semantics or re-exec via a dedicated launcher.
+The test failure is a code bug in the import-time re-exec guard (`src/jonaki.py:11-17`), not only a documentation bug. The guard should run only when the module is executed as the main program, and it should preserve `-m`/script semantics or re-exec via a dedicated launcher.
 
 ### 10.5 Documentation recommendations
 
@@ -670,7 +670,7 @@ The suite is fast and the tests are readable. It is also almost entirely **unit-
 
 | Gap | Why it matters | Suggested test |
 | :--- | :--- | :--- |
-| Absolute paths | The most common invocation is broken. | `parse_arguments(["potplayer", "/tmp/x.mkv"])` contains the path. |
+| Absolute paths | The most common invocation is broken. | `parse_arguments(["jonaki", "/tmp/x.mkv"])` contains the path. |
 | Startup option ordering | `/volume`, `/seek`, `/sub`, `/aud` are dropped. | Fake core records calls; assert they occur after `start_engine`. |
 | `end-file` reasons | Stop/error/replace advance the playlist. | Feed `eof`, `stop`, `error`, `quit`; assert only `eof` advances. |
 | IPC ownership | Second `/new` unlinks the first socket. | Start two servers, stop the second, assert the first still answers. |
@@ -687,7 +687,7 @@ The suite is fast and the tests are readable. It is also almost entirely **unit-
 
 ### 11.3 Test-suite design problems
 
-1. **Import-time side effects.** `tests/test_cli.py` imports `potplayer`, whose module-level guard can `os.execv` Python while tests are running. Tests should never re-exec the interpreter on import. Move the guard under `if __name__ == "__main__":` or into a launcher script.
+1. **Import-time side effects.** `tests/test_cli.py` imports `jonaki`, whose module-level guard can `os.execv` Python while tests are running. Tests should never re-exec the interpreter on import. Move the guard under `if __name__ == "__main__":` or into a launcher script.
 2. **No package structure.** Every test inserts `src` into `sys.path` manually. This hides import/packaging problems and makes it easy for tests to pass in-tree but fail after installation.
 3. **The skin test depends on a proprietary binary asset.** If `assets/skins/Default.dsf` is removed for legal reasons, the test fails. It also tests only “there is at least one button,” not layout or rendering.
 4. **The CLI test encodes the absolute-path bug.** It uses `movie.mkv`, so it cannot catch the failure that affects real users.
@@ -734,7 +734,7 @@ No formal CPU or memory benchmark was run; this is a structural review of obviou
 
 - `start_engine()` waits for the mpv socket in 50 ms increments for up to 2.5 seconds **on the GTK main thread** (`src/core/engine.py:98-107`). The window is already being realized, so the UI can appear frozen during startup.
 - The DSF ZIP and five PNG sprites are loaded synchronously in `PotSkinEngine.__init__`, before the window is shown. This is small today but will grow with larger skins.
-- `MediaDatabase()` opens SQLite and creates tables on construction; `MediaCaptureManager()` creates `~/Pictures/PotPlayer`; both are side effects on the startup path.
+- `MediaDatabase()` opens SQLite and creates tables on construction; `MediaCaptureManager()` creates `~/Pictures/Jonaki`; both are side effects on the startup path.
 - mpv’s stderr is discarded, so slow or failed starts have no diagnostic timeline.
 
 **Target:** show the window immediately, start mpv asynchronously, and render a loading/error state. Startup to interactive should be well under one second on a normal desktop.
@@ -807,8 +807,8 @@ The project has no known remote-code-execution path today because it does not lo
 
 Findings:
 
-- The preferred path is `$XDG_RUNTIME_DIR/potplayer_ipc.sock`, which is normally a private 0700 directory. Good.
-- If `XDG_RUNTIME_DIR` is missing or not a directory, the fallback is `/tmp/potplayer_<uid>`, created with `os.makedirs(..., exist_ok=True)`. The default mode is usually 0755, and the socket is not explicitly chmodded. Another local user may be able to connect.
+- The preferred path is `$XDG_RUNTIME_DIR/jonaki_ipc.sock`, which is normally a private 0700 directory. Good.
+- If `XDG_RUNTIME_DIR` is missing or not a directory, the fallback is `/tmp/jonaki_<uid>`, created with `os.makedirs(..., exist_ok=True)`. The default mode is usually 0755, and the socket is not explicitly chmodded. Another local user may be able to connect.
 - There is no peer credential check (`SO_PEERCRED`) and no authentication. Any process that can connect can send `{"command": "open", ...}` and make the player open a path or URL.
 - The server does not validate or canonicalize paths/URLs, cap message size beyond one `recv(65536)`, or require a protocol version.
 - The `start()` check-then-unlink sequence is racy in a shared directory; a pre-created path or symlink could interfere. The unconditional unlink in `stop()` is also a correctness and safety problem (see P1-1).
@@ -818,7 +818,7 @@ Findings:
 
 **Recommendation:**
 
-1. Require a private runtime directory. If `XDG_RUNTIME_DIR` is unavailable, create a `tempfile.mkdtemp(prefix="potplayer-")` with mode 0700 and verify ownership, rather than a predictable `/tmp` path.
+1. Require a private runtime directory. If `XDG_RUNTIME_DIR` is unavailable, create a `tempfile.mkdtemp(prefix="jonaki-")` with mode 0700 and verify ownership, rather than a predictable `/tmp` path.
 2. `chmod` the socket to 0600 after bind.
 3. Verify `SO_PEERCRED` UID matches the process UID; reject others.
 4. Add a small versioned request schema, size limit, read timeout, and connection cap.
@@ -833,7 +833,7 @@ Findings:
 
 - The default translator provider is Google’s public endpoint. Subtitle text is sent to a third party with no explicit consent, disclosure, or provider configuration UI. A local LLM option exists but is not the default.
 - `SubtitleSearchClient` sends a file hash (and file size/query) to OpenSubtitles. This is a strong fingerprint of the viewed media and is also not disclosed.
-- `PotPlayerHostAPI` can fetch arbitrary URLs with caller-supplied headers. It is not currently reachable by untrusted code because there is no loader; if a plugin runtime is added, this becomes an SSRF/exfiltration primitive unless capabilities are restricted.
+- `JonakiHostAPI` can fetch arbitrary URLs with caller-supplied headers. It is not currently reachable by untrusted code because there is no loader; if a plugin runtime is added, this becomes an SSRF/exfiltration primitive unless capabilities are restricted.
 - Translator errors are rendered into subtitle text, which could expose internal error details or URLs on screen.
 
 **Impact:** users may leak viewing habits and subtitle content without realizing it. This is a privacy issue even if the requests use HTTPS.
@@ -891,7 +891,7 @@ Findings:
 
 ### 14.1 The EULA conflict is the largest blocker
 
-`extracted_potplayer/License.txt` contains the PotPlayer license in multiple languages. The relevant restrictions (English/Korean/Japanese sections) state, in substance:
+`extracted_jonaki/License.txt` contains the Jonaki license in multiple languages. The relevant restrictions (English/Korean/Japanese sections) state, in substance:
 
 - The program may be installed and used free of charge by individuals, companies, schools, and government offices.
 - The program is protected by copyright and software protection laws.
@@ -899,7 +899,7 @@ Findings:
 - **Commercial use without the copyright holder’s permission is prohibited.**
 - Copyright is attributed to Kakao Corp.
 
-This repository is explicitly a reverse-engineering project: `docs/README.md:12` says the objective is to reverse engineer the Windows distribution, including binaries, RTTI, resources, skins, shaders, and CLI. It also redistributes extracted Windows binaries (`PotPlayer64.dll`, `PotPlayer64.exe`, `ffcodec64.dll`, `MediaDB64.dll`, and many others), the installer `PotPlayerSetup64.exe`, original `.dsf` skins, the PotPlayer logo, language files, and other proprietary assets.
+This repository is explicitly a reverse-engineering project: `docs/README.md:12` says the objective is to reverse engineer the Windows distribution, including binaries, RTTI, resources, skins, shaders, and CLI. It also redistributes extracted Windows binaries (`Jonaki64.dll`, `Jonaki64.exe`, `ffcodec64.dll`, `MediaDB64.dll`, and many others), the installer `JonakiSetup64.exe`, original `.dsf` skins, the Jonaki logo, language files, and other proprietary assets.
 
 That is a direct conflict with the EULA as written. Whether local law provides an interoperability exception, whether the EULA is enforceable in a given jurisdiction, and whether any use is “commercial” are fact-specific questions for counsel. The project should not assume that a research or non-commercial label resolves the issue, especially if binaries or assets are redistributed.
 
@@ -917,11 +917,11 @@ No root `LICENSE`, `COPYING`, or SPDX identifier exists. Under default copyright
 
 The repo contains, at minimum:
 
-- `PotPlayerSetup64.exe` (Windows installer)
-- `extracted_potplayer/` with PotPlayer executables, DLLs, skins, language files, icons, and scripts
+- `JonakiSetup64.exe` (Windows installer)
+- `extracted_jonaki/` with Jonaki executables, DLLs, skins, language files, icons, and scripts
 - `assets/skins/Default.dsf`, `assets/skins/WindowFrame.dsf`
-- `assets/logos/PotPlayer.png`
-- PotPlayer-derived menu/layout text and documentation excerpts
+- `assets/logos/Jonaki.png`
+- Jonaki-derived menu/layout text and documentation excerpts
 
 These are not original project assets. Redistributing them is not covered by an open-source license and is likely outside the EULA’s permission to “install and use” the program.
 
@@ -929,9 +929,9 @@ These are not original project assets. Redistributing them is not covered by an 
 
 ### 14.4 Trademark and naming
 
-“PotPlayer” and the PotPlayer logo are associated with Kakao/Daum. Using the name for an unaffiliated clone can create confusion about sponsorship or endorsement, especially with the current About dialog (“Copyright (C) 2006-2026 Kakao Corp / Open Source Linux Clone”) and the upstream website link.
+“Jonaki” and the Jonaki logo are associated with Kakao/Daum. Using the name for an unaffiliated clone can create confusion about sponsorship or endorsement, especially with the current About dialog (“Copyright (C) 2006-2026 Kakao Corp / Open Source Linux Clone”) and the upstream website link.
 
-**Action:** rename the project to a distinct name, use original branding, add a clear “unaffiliated with Kakao/Daum” disclaimer, and avoid the upstream logo in the UI and store listings. Descriptive references such as “compatible with PotPlayer-style shortcuts” are less risky than product-name usage, but still require care.
+**Action:** rename the project to a distinct name, use original branding, add a clear “unaffiliated with Kakao/Daum” disclaimer, and avoid the upstream logo in the UI and store listings. Descriptive references such as “compatible with Jonaki-style shortcuts” are less risky than product-name usage, but still require care.
 
 ### 14.5 Third-party license obligations
 
@@ -961,8 +961,8 @@ The docs identify specific binaries, class names, and offsets. If the project di
 
 | Risk | Evidence | Severity | Required action |
 | :--- | :--- | :---: | :--- |
-| EULA prohibits reverse engineering/modification | `extracted_potplayer/License.txt` | High | Counsel review; stop public distribution of derived artifacts |
-| Proprietary binaries/assets redistributed | `extracted_potplayer/`, `assets/skins/`, `assets/logos/` | High | Remove from repo/releases; replace with original assets |
+| EULA prohibits reverse engineering/modification | `extracted_jonaki/License.txt` | High | Counsel review; stop public distribution of derived artifacts |
+| Proprietary binaries/assets redistributed | `extracted_jonaki/`, `assets/skins/`, `assets/logos/` | High | Remove from repo/releases; replace with original assets |
 | No project license while claiming open source | Root directory; `docs/README.md:3` | High | Add a license or stop calling it open source |
 | False copyright/affiliation in About | `src/ui/main_window.py:798` | High | Correct attribution and add disclaimer |
 | Trademark confusion | Product name, logo, upstream URL | Medium–High | Rename, rebrand, disclaimer |
@@ -989,7 +989,7 @@ If the goal is a private research prototype, keep it private and do not distribu
 
 There is no root `README.md`, `LICENSE`, `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, lockfile, `Makefile`, `justfile`, or install target. There are no `__init__.py` files under `src/` or `tests/`, so the code is a collection of scripts and implicit namespace packages rather than an installable application.
 
-The only launcher is `bin/potplayer`, which:
+The only launcher is `bin/jonaki`, which:
 
 - assumes the project directory layout,
 - hard-codes `$HOME/.local/lib/python3.13/site-packages`,
@@ -997,14 +997,14 @@ The only launcher is `bin/potplayer`, which:
 - does not check for GTK 3, PyGObject, Cairo, mpv, or FFmpeg,
 - does not set `XDG_RUNTIME_DIR` or handle a missing display.
 
-`potplayer.desktop` is also development-local:
+`jonaki.desktop` is also development-local:
 
 ```ini
-Exec=potplayer %U
-Icon=/home/ashik/Data/Projects/PotPlayer/assets/logos/PotPlayer.png
+Exec=jonaki %U
+Icon=/home/ashik/Data/Projects/Jonaki/assets/logos/Jonaki.png
 ```
 
-The absolute `Icon=` path breaks on every other machine, and `Exec=potplayer` only works if a `potplayer` binary is on `PATH`. There is no `TryExec`, no `StartupWMClass`, no AppStream metainfo, and no icon-theme installation.
+The absolute `Icon=` path breaks on every other machine, and `Exec=jonaki` only works if a `jonaki` binary is on `PATH`. There is no `TryExec`, no `StartupWMClass`, no AppStream metainfo, and no icon-theme installation.
 
 ### 15.2 Dependency list is wrong
 
@@ -1028,7 +1028,7 @@ A minimal, maintainable first release:
 
 ```text
 pyproject.toml
-src/potplayer/
+src/jonaki/
   __init__.py
   __main__.py
   ... modules ...
@@ -1045,14 +1045,14 @@ tests/
 - Python requirement,
 - runtime dependencies (`PyGObject`, `pycairo`),
 - optional extras (`capture`, `mpris`, `dev`),
-- console script `potplayer = potplayer.__main__:main`,
+- console script `jonaki = jonaki.__main__:main`,
 - package data for assets,
 - tool configuration for `ruff`, `mypy`, `pytest`, and coverage.
 
 Then provide:
 
 - a wheel/sdist build,
-- a system install target (`/usr/bin`, `/usr/share/potplayer`, `/usr/share/applications`, `/usr/share/icons/hicolor`, `/usr/share/metainfo`),
+- a system install target (`/usr/bin`, `/usr/share/jonaki`, `/usr/share/applications`, `/usr/share/icons/hicolor`, `/usr/share/metainfo`),
 - a Flatpak manifest using portals and a runtime, not `--filesystem=host`,
 - an AppImage only if the multimedia library licensing is compatible,
 - a `.deb` with proper `Depends:` and desktop integration,
@@ -1076,8 +1076,8 @@ Then provide:
 A release is credible only when all of these pass in a clean environment:
 
 - `pip install .` (or the distro package) installs the app and assets.
-- `potplayer --version` and `potplayer --help` work without a display.
-- `potplayer /absolute/path/video.mkv` opens the file.
+- `jonaki --version` and `jonaki --help` work without a display.
+- `jonaki /absolute/path/video.mkv` opens the file.
 - The desktop file validates with `desktop-file-validate`.
 - The app launches from the application menu with a themed icon.
 - No proprietary binaries/assets are present.

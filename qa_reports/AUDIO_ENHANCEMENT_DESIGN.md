@@ -9,10 +9,10 @@
 
 ## 1. Objective & Problem Statement
 
-### 1.1 The "PotPlayer Windows Loudness Advantage"
-Users transitioning from PotPlayer on Windows to native Linux media players frequently report that Linux players sound significantly quieter, requiring them to push system volume near 100% or strain to hear quiet speech in movies and streams. 
+### 1.1 The "Jonaki Windows Loudness Advantage"
+Users transitioning from Jonaki on Windows to native Linux media players frequently report that Linux players sound significantly quieter, requiring them to push system volume near 100% or strain to hear quiet speech in movies and streams. 
 
-In Windows PotPlayer, this perceived loudness advantage is achieved not through simple volume scaling, but through an integrated, multi-stage audio processing pipeline:
+In Windows Jonaki, this perceived loudness advantage is achieved not through simple volume scaling, but through an integrated, multi-stage audio processing pipeline:
 1. **Pre-Amplification Gain**: Lifts low-level dialogue into a comfortable listening range.
 2. **Dynamic Range Compression**: Reduces the difference between quiet dialogue and loud action passages, controlling the crest factor.
 3. **Soft-Knee Peak Limiting**: Caps high-energy bursts to prevent harsh digital clipping.
@@ -153,7 +153,7 @@ As mandated by Section 2.D of the requirements, loudness normalization methods w
 `loudnorm` normalizes integrated loudness to a fixed target (e.g., -23 LUFS or -16 LUFS).
 - **Strengths:** Enforces strict uniformity across television broadcast channels.
 - **Weaknesses:** When playing high-energy pop/electronic music (mastered at -8 to -10 LUFS) or movie explosions, `loudnorm` actively attenuates the audio by **-6 to -14 dB**, completely defeating the user's desire for high loudness! Furthermore, dynamic movie soundtracks had their loudness range (LRA) crushed from 7.8 LU down to 1.4 LU.
-- **Architectural Decision:** Fixed-target EBU R128 normalization is unsuitable as a general PotPlayer-style loudness enhancer and is therefore not forced into the default playback chain.
+- **Architectural Decision:** Fixed-target EBU R128 normalization is unsuitable as a general Jonaki-style loudness enhancer and is therefore not forced into the default playback chain.
 
 ---
 

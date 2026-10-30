@@ -47,6 +47,9 @@ MPRIS_INTROSPECTION_XML = """
     <method name="OpenUri">
       <arg direction="in" name="Uri" type="s"/>
     </method>
+    <signal name="Seeked">
+      <arg name="Position" type="x"/>
+    </signal>
     <property name="PlaybackStatus" type="s" access="read"/>
     <property name="LoopStatus" type="s" access="readwrite"/>
     <property name="Rate" type="d" access="readwrite"/>
@@ -224,6 +227,7 @@ class MPRIS2Service:
             (offset_us,) = parameters.unpack()
             offset_sec = offset_us / 1000000.0
             core.seek_relative(offset_sec)
+            self.notify_seeked(core.position)
             invocation.return_value(None)
         elif method_name == "SetPosition":
             (track_id, position_us) = parameters.unpack()
@@ -231,6 +235,7 @@ class MPRIS2Service:
                 pos_sec = position_us / 1000000.0
                 if not core.duration or pos_sec <= core.duration:
                     core.seek_absolute(pos_sec)
+                    self.notify_seeked(core.position)
             invocation.return_value(None)
         elif method_name == "OpenUri":
             (uri,) = parameters.unpack()
@@ -326,6 +331,24 @@ class MPRIS2Service:
             meta["mpris:trackid"] = GLib.Variant("o", "/org/mpris/MediaPlayer2/TrackList/NoTrack")
 
         return GLib.Variant("a{sv}", meta)
+
+    def notify_seeked(self, position_sec: float) -> None:
+        """
+        Emits Seeked signal when position changes via Seek or SetPosition.
+        """
+        if not self.connection:
+            return
+        pos_us = int(position_sec * 1000000) if (math.isfinite(position_sec) and position_sec >= 0) else 0
+        try:
+            self.connection.emit_signal(
+                None,
+                self.OBJECT_PATH,
+                "org.mpris.MediaPlayer2.Player",
+                "Seeked",
+                GLib.Variant("(x)", (pos_us,))
+            )
+        except Exception:
+            pass
 
     def notify_playback_changed(self) -> None:
         """

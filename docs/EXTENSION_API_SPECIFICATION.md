@@ -1,20 +1,20 @@
 # Extension API Specification: AngelScript & Python Plugin Runtime
 
-This document specifies the extensibility framework of PotPlayer for Linux, reverse-engineered from `extracted_potplayer/Extension/api.txt` and the native AngelScript plugins in `Extension/Media/` and `Extension/Subtitle/`.
+This document specifies the extensibility framework of Jonaki for Linux, reverse-engineered from `extracted_jonaki/Extension/api.txt` and the native AngelScript plugins in `Extension/Media/` and `Extension/Subtitle/`.
 
 ---
 
 ## 1. Extension Runtime Architecture
 
-PotPlayer supports hot-pluggable extensions for media parsing, online playlist retrieval, real-time subtitle translation, and automated subtitle downloading.
+Jonaki supports hot-pluggable extensions for media parsing, online playlist retrieval, real-time subtitle translation, and automated subtitle downloading.
 
 In the Linux implementation, the runtime provides **dual-runtime compatibility**:
-1. **AngelScript Emulation Layer**: Allows existing `.as` scripts written for Windows PotPlayer to run unchanged via an AngelScript virtual machine or AST transpiler.
+1. **AngelScript Emulation Layer**: Allows existing `.as` scripts written for Windows Jonaki to run unchanged via an AngelScript virtual machine or AST transpiler.
 2. **Native Python Plugin Engine**: Allows developers to write modern Python plugins using standard libraries (`requests`, `json`, `bs4`, `yt-dlp`).
 
 ```mermaid
 flowchart TD
-    subgraph Host_Player ["PotPlayer Linux Core"]
+    subgraph Host_Player ["Jonaki Linux Core"]
         DISPATCH["Extension Dispatcher"]
     end
 
@@ -60,8 +60,8 @@ void HostPrintUTF8(const string &in log); // Prints diagnostic log
 string HostGetScriptFolder();             // Directory of the executing script
 string HostGetExtensionFolder();          // Root extensions directory
 string HostGetTempFolder();               // System temporary directory (/tmp)
-string HostGetConfigFolder();             // User configuration directory (~/.config/potplayer)
-string HostGetExecuteFolder();            // PotPlayer installation directory
+string HostGetConfigFolder();             // User configuration directory (~/.config/jonaki)
+string HostGetExecuteFolder();            // Jonaki installation directory
 bool HostFileExist(const string &in fn);
 bool HostFolderExist(const string &in fn);
 bool HostFolderCreate(const string &in fn);
@@ -174,7 +174,7 @@ string PlayParse(const string &in url, string &out title);            // Returns
 For Linux developers, plugins can also be implemented as lightweight Python modules:
 
 ```python
-# ~/.config/potplayer/extensions/translate_ollama.py
+# ~/.config/jonaki/extensions/translate_ollama.py
 import requests
 
 class SubtitleTranslator:

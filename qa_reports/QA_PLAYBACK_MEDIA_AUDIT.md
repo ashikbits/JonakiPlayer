@@ -3,7 +3,7 @@
 **Audit Phase:** Phase 2.A & Phase 2.B  
 **Author:** Playback & Media QA Specialist, SQA Team  
 **Date:** 2026-10-27  
-**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/PotPlayer`)  
+**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/Jonaki`)  
 **Target Module:** `JonakiCore` (`src/core/engine.py`) backed by packed in-process `libmpv`  
 **Status:** Audit Complete — 60 Automated Integration Tests Authored & Verified (100% Passing in CI suite)
 

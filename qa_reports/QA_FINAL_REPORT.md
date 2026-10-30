@@ -3,7 +3,7 @@
 **Document Version:** 1.0.0  
 **Audit Completion Date:** 2026-10-27  
 **Lead Auditor:** Senior Software QA Engineer & Linux Desktop Application Tester  
-**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/PotPlayer`)  
+**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/Jonaki`)  
 **Commit Baseline:** `9743287`  
 **Host Environment:** Debian GNU/Linux 13 (Trixie), Kernel 6.12.113+deb13-amd64, x86_64  
 **Display Session:** Wayland / XWayland (`DISPLAY=:1`, `WAYLAND_DISPLAY=wayland-0`)  
@@ -14,7 +14,7 @@
 
 ## 1. Executive Summary
 
-Jonaki Player (inspired by PotPlayer for Linux) was subjected to an exhaustive, evidence-based Software Quality Assurance (SQA) audit. The goal of this mission was to rigorously evaluate playback integrity, UI responsiveness, crash resilience, desktop integration, system security, and memory reliability, moving beyond superficial launch checks to verify actual runtime behavior under stress and edge-case conditions.
+Jonaki Player (inspired by Jonaki for Linux) was subjected to an exhaustive, evidence-based Software Quality Assurance (SQA) audit. The goal of this mission was to rigorously evaluate playback integrity, UI responsiveness, crash resilience, desktop integration, system security, and memory reliability, moving beyond superficial launch checks to verify actual runtime behavior under stress and edge-case conditions.
 
 ### High-Level Audit Outcomes:
 1. **Test Coverage Scaled by +153%**: Test suite expanded from 107 baseline unit tests to **271 automated test cases** spanning 14 test modules, incorporating a reproducible 21-fixture media corpus and native 8K 60fps AV1 playback verification.
@@ -33,7 +33,7 @@ Jonaki Player couples a high-performance multimedia backend with a native Linux 
 |                                  Jonaki Player                                    |
 +-----------------------------------------------------------------------------------+
 |  UI Layer (GTK 3 + Cairo)                                                         |
-|  - DSF Skin Engine (PotPlayer .dsf parser & Cairo vector blitter)                 |
+|  - DSF Skin Engine (Jonaki .dsf parser & Cairo vector blitter)                 |
 |  - OSD / HUD Hardware Overlay (`Tab`, seekbar thumbnails, notification badges)    |
 |  - Keyboard Accelerator Router (50+ shortcuts: Space, Enter, A-B, ProcAmp, EQ)   |
 |  - Secondary Windows (Control Box F6, EQ F7, Playlist F8/F12, Media Info Ctrl+F1) |
@@ -56,7 +56,7 @@ Jonaki Player couples a high-performance multimedia backend with a native Linux 
 
 ### Phase 1: Codebase Reconnaissance
 - Identified architecture: Python 3.13 + PyGObject 3.48 + PyCairo + bundled `libmpv.so.2.5.0` loaded via `ctypes`.
-- Verified desktop integration: `bin/jonaki`, `bin/potplayer` launchers enforce `GDK_BACKEND=x11` to provide a native X11 window ID (`wid`) for `libmpv` direct rendering under Wayland.
+- Verified desktop integration: `bin/jonaki`, `bin/jonaki` launchers enforce `GDK_BACKEND=x11` to provide a native X11 window ID (`wid`) for `libmpv` direct rendering under Wayland.
 - Baseline test pass: 107 tests passing.
 
 ### Phase 2: Risk-Based Test Plan
@@ -138,14 +138,14 @@ All detailed audit artifacts, test suites, and machine-readable logs are preserv
 
 | Deliverable Artifact | Description | Absolute Link |
 | :--- | :--- | :--- |
-| **QA Test Plan** | Risk-based test strategy, scope, environment, and acceptance criteria | [`qa_reports/QA_TEST_PLAN.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/QA_TEST_PLAN.md) |
-| **QA Test Results** | Detailed baseline and post-fix execution breakdown across all suites | [`qa_reports/QA_TEST_RESULTS.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/QA_TEST_RESULTS.md) |
-| **QA Confirmed Defects Log** | Exhaustive defect catalog with root causes, reproduction steps, and fixes | [`qa_reports/QA_DEFECTS.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/QA_DEFECTS.md) |
-| **QA Regression Report** | Comparative before/after metrics, defect verification, and side-effect audit | [`qa_reports/QA_REGRESSION_REPORT.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/QA_REGRESSION_REPORT.md) |
-| **QA Final Audit Report** | Executive summary, quality profile, and release sign-off (this document) | [`qa_reports/QA_FINAL_REPORT.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/QA_FINAL_REPORT.md) |
-| **JUnit XML Report** | Machine-readable CI/CD test execution report (271 test cases) | [`qa_reports/junit_report.xml`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/junit_report.xml) |
-| **Playback & Media Audit** | Deep technical report on codecs, containers, A/V sync, and 8K playback | [`qa_reports/QA_PLAYBACK_MEDIA_AUDIT.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/QA_PLAYBACK_MEDIA_AUDIT.md) |
-| **Systems & Security Audit** | In-depth audit of IPC, MPRIS2, database, desktop packaging, and security | [`qa_reports/systems_security_reliability_audit.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/systems_security_reliability_audit.md) |
+| **QA Test Plan** | Risk-based test strategy, scope, environment, and acceptance criteria | [`qa_reports/QA_TEST_PLAN.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/QA_TEST_PLAN.md) |
+| **QA Test Results** | Detailed baseline and post-fix execution breakdown across all suites | [`qa_reports/QA_TEST_RESULTS.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/QA_TEST_RESULTS.md) |
+| **QA Confirmed Defects Log** | Exhaustive defect catalog with root causes, reproduction steps, and fixes | [`qa_reports/QA_DEFECTS.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/QA_DEFECTS.md) |
+| **QA Regression Report** | Comparative before/after metrics, defect verification, and side-effect audit | [`qa_reports/QA_REGRESSION_REPORT.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/QA_REGRESSION_REPORT.md) |
+| **QA Final Audit Report** | Executive summary, quality profile, and release sign-off (this document) | [`qa_reports/QA_FINAL_REPORT.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/QA_FINAL_REPORT.md) |
+| **JUnit XML Report** | Machine-readable CI/CD test execution report (271 test cases) | [`qa_reports/junit_report.xml`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/junit_report.xml) |
+| **Playback & Media Audit** | Deep technical report on codecs, containers, A/V sync, and 8K playback | [`qa_reports/QA_PLAYBACK_MEDIA_AUDIT.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/QA_PLAYBACK_MEDIA_AUDIT.md) |
+| **Systems & Security Audit** | In-depth audit of IPC, MPRIS2, database, desktop packaging, and security | [`qa_reports/systems_security_reliability_audit.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/systems_security_reliability_audit.md) |
 
 ---
 

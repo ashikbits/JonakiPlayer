@@ -59,8 +59,9 @@ class MediaCaptureManager:
         if duration_sec <= 0:
             duration_sec = 60.0
 
-        interval = duration_sec / (total_frames + 1)
-        fps_val = 1.0 / interval
+        duration_sec = max(1.0, duration_sec)
+        interval = max(0.5, duration_sec / (total_frames + 1))
+        fps_val = min(10.0, 1.0 / interval)
         # Select frames evenly spaced across duration
         filter_str = f"fps={fps_val:.6f},scale=320:-1,drawtext=text='%{{pts\\:hms}}':x=10:y=h-th-10:fontcolor=white:box=1:boxcolor=black@0.6,tile={columns}x{rows}"
 
@@ -81,15 +82,30 @@ class MediaCaptureManager:
 
     def copy_file_to_clipboard(self, image_path: str) -> bool:
         """
-        Copies image to system clipboard via wl-copy (Wayland) or xclip (X11).
+        Copies image to system clipboard via GTK native clipboard, wl-copy, or xclip.
         """
         if not os.path.exists(image_path):
             return False
 
+        # 1. Native GTK in-process clipboard (primary, zero external dependencies)
+        try:
+            import gi
+            gi.require_version('Gtk', '3.0')
+            gi.require_version('Gdk', '3.0')
+            gi.require_version('GdkPixbuf', '2.0')
+            from gi.repository import Gtk, Gdk, GdkPixbuf
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(image_path)
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            clipboard.set_image(pixbuf)
+            clipboard.store()
+            return True
+        except Exception:
+            pass
+
         import mimetypes
         mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
 
-        # Try wl-copy (Wayland)
+        # 2. Try wl-copy (Wayland fallback)
         try:
             with open(image_path, "rb") as f:
                 subprocess.run(["wl-copy", "--type", mime_type], stdin=f, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
@@ -97,7 +113,7 @@ class MediaCaptureManager:
         except (subprocess.SubprocessError, FileNotFoundError):
             pass
 
-        # Try xclip (X11)
+        # 3. Try xclip (X11 fallback)
         try:
             subprocess.run(["xclip", "-selection", "clipboard", "-t", mime_type, "-i", image_path],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)

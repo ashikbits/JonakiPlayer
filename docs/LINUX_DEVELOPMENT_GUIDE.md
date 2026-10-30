@@ -1,6 +1,6 @@
-# Linux Development & Packaging Guide: PotPlayer for Linux
+# Linux Development & Packaging Guide: Jonaki for Linux
 
-This document provides complete instructions for developers building, testing, extending, and packaging **PotPlayer for Linux**.
+This document provides complete instructions for developers building, testing, extending, and packaging **Jonaki for Linux**.
 
 ---
 
@@ -42,16 +42,16 @@ sudo dnf install -y \
 ### 2.1 Running the Player Directly via the Launcher
 ```bash
 # Launch player
-./bin/potplayer
+./bin/jonaki
 
 # Open a video file with 5-second initial seek
-./bin/potplayer /path/to/video.mkv /seek=00:05:00
+./bin/jonaki /path/to/video.mkv /seek=00:05:00
 
 # Stream video from stdin
-yt-dlp -o - -f best "https://www.youtube.com/watch?v=..." | ./bin/potplayer -
+yt-dlp -o - -f best "https://www.youtube.com/watch?v=..." | ./bin/jonaki -
 
 # Open video with external subtitle and initial volume
-./bin/potplayer video.mp4 /sub="sub.srt" /volume=80
+./bin/jonaki video.mp4 /sub="sub.srt" /volume=80
 ```
 
 ### 3.2 Running Conformance Tests
@@ -66,17 +66,17 @@ python3 -m unittest discover -s tests -p "test_*.py" -v
 ### 4.1 AppImage Packaging
 Using `appimagetool` to produce a portable single-binary executable containing all dependencies (Python runtime, GTK4 libraries, FFmpeg, and MPV):
 ```bash
-python3 scripts/build_appimage.py --output PotPlayer-x86_64.AppImage
+python3 scripts/build_appimage.py --output Jonaki-x86_64.AppImage
 ```
 
 ### 4.2 Flatpak Packaging
-The `io.github.potplayer_linux.PotPlayer.yml` manifest packages PotPlayer with Wayland, X11, PipeWire, and GPU device permissions:
+The `io.github.jonaki_linux.Jonaki.yml` manifest packages Jonaki with Wayland, X11, PipeWire, and GPU device permissions:
 ```yaml
-app-id: io.github.potplayer_linux.PotPlayer
+app-id: io.github.jonaki_linux.Jonaki
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
-command: potplayer
+command: jonaki
 finish-args:
   - --share=ipc
   - --socket=fallback-x11

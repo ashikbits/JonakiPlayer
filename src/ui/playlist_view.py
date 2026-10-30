@@ -15,8 +15,10 @@ class PlaylistWindow(Gtk.Window):
     def __init__(self, player_controller: Any):
         super().__init__(title="Jonaki Playlist (F8 / F12)")
         self.player = player_controller
+        if isinstance(player_controller, Gtk.Window):
+            self.set_transient_for(player_controller)
         self.set_default_size(360, 520)
-        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         vbox.set_margin_start(8)
@@ -80,13 +82,22 @@ class PlaylistWindow(Gtk.Window):
         vbox.pack_start(bottom_box, False, False, 4)
 
         self.connect("delete-event", lambda w, e: self.hide_on_delete())
+        self.connect("key-press-event", self._on_key_press)
+
+    def _on_key_press(self, widget, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.hide()
+            return True
+        return False
 
     def update_playlist(self, items: List[Dict[str, Any]]) -> None:
         self.list_store.clear()
         total_sec = 0.0
+        cur_idx = getattr(self.player, "current_index", -1)
         for i, item in enumerate(items):
             item_path = item.get("path") or ""
-            title = item.get("title") or (os.path.basename(item_path) if item_path else "Unknown")
+            raw_title = item.get("title") or (os.path.basename(item_path) if item_path else "Unknown")
+            title = f"▶ {raw_title}" if i == cur_idx else raw_title
             dur = item.get("duration", 0.0)
             total_sec += dur
             dur_str = self._format_duration(dur)

@@ -11,11 +11,12 @@ import re
 import uuid
 import socket
 import logging
+import ipaddress
 import mimetypes
 import threading
 from typing import Optional, Tuple
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from .engine import TorrentEngine
 
@@ -89,28 +90,34 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
     def _handle_request(self, send_body: bool = True) -> None:
         # 1. Enforce loopback client origin
         client_ip = self.client_address[0]
-        if client_ip not in ("127.0.0.1", "::1", "localhost"):
-            logger.warning("Rejected non-loopback request from %s", client_ip)
-            self.send_error(403, "Forbidden: Loopback access only")
+        try:
+            ip_obj = ipaddress.ip_address(client_ip)
+            if not ip_obj.is_loopback:
+                logger.warning("Rejected non-loopback request from %s", client_ip)
+                self.send_error(403, "Forbidden: Loopback access only")
+                return
+        except ValueError:
+            logger.warning("Rejected invalid client IP %s", client_ip)
+            self.send_error(403, "Forbidden: Invalid client address")
             return
 
         parsed = urlparse(self.path)
-        path = unquote(parsed.path)
+        # Split URL path components before unquoting to prevent path collision
+        raw_parts = [p for p in parsed.path.split("/") if p]
 
         # 2. Validate route and session token: strictly /stream/<session_id>/<filename>
-        parts = [p for p in path.split("/") if p]
-        if len(parts) != 3 or parts[0] != "stream" or ".." in parts or "." in parts:
+        if len(raw_parts) != 3 or raw_parts[0] != "stream" or ".." in raw_parts or "." in raw_parts:
             self.send_error(404, "Not Found")
             return
 
-        req_session_id = parts[1]
+        req_session_id = unquote(raw_parts[1])
         bridge = self.server.bridge
         if req_session_id != bridge.session_id:
             logger.warning("Invalid session id: %s (expected %s)", req_session_id, bridge.session_id)
             self.send_error(404, "Session Not Found or Expired")
             return
 
-        req_filename = parts[2]
+        req_filename = unquote(raw_parts[2])
         engine = bridge.engine
         total_size = engine.get_selected_file_size()
         file_path = engine.get_selected_file_path()
@@ -262,6 +269,8 @@ class TorrentHttpBridge:
         Starts the HTTP loopback bridge server.
         Returns the full loopback stream URL for MPV.
         """
+        if self.server is not None:
+            self.stop()
         # Strictly bind to 127.0.0.1
         self.cancel_event.clear()
         self.server = TorrentHttpBridgeServer(
@@ -278,7 +287,8 @@ class TorrentHttpBridge:
         # Generate stream URL
         target_path = self.engine.get_selected_file_path()
         filename = os.path.basename(target_path) if target_path else "stream.mp4"
-        stream_url = f"http://127.0.0.1:{self.port}/stream/{self.session_id}/{filename}"
+        quoted_filename = quote(filename, safe="")
+        stream_url = f"http://127.0.0.1:{self.port}/stream/{self.session_id}/{quoted_filename}"
         logger.info("Torrent loopback bridge started on: %s", stream_url)
         return stream_url
 
@@ -288,7 +298,8 @@ class TorrentHttpBridge:
             return None
         target_path = self.engine.get_selected_file_path()
         filename = os.path.basename(target_path) if target_path else "stream.mp4"
-        return f"http://127.0.0.1:{self.port}/stream/{self.session_id}/{filename}"
+        quoted_filename = quote(filename, safe="")
+        return f"http://127.0.0.1:{self.port}/stream/{self.session_id}/{quoted_filename}"
 
     def stop(self) -> None:
         """Stops the HTTP bridge server and cleans up threads."""

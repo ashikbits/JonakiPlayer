@@ -12,6 +12,12 @@ export GST_PLUGIN_PATH="$PROJECT_DIR/lib/gstreamer-1.0:$HOME/.local/lib/gstreame
 export GDK_BACKEND=x11
 unset WAYLAND_DISPLAY
 
+# Audio stream identification for PipeWire and PulseAudio mixers (KDE Plasma, GNOME Soundbar)
+export PULSE_PROP="application.name='Jonaki' application.process.binary='jonaki' application.id='jonaki' application.desktop-entry='jonaki' application.icon_name='jonaki' media.role='video'"
+export PIPEWIRE_APP_NAME="Jonaki"
+export PIPEWIRE_APP_ICON="jonaki"
+export PIPEWIRE_APP_ID="jonaki"
+
 if [ -z "$VDPAU_DRIVER" ]; then
     if [ -f "/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_radeonsi.so" ]; then
         export VDPAU_DRIVER=radeonsi

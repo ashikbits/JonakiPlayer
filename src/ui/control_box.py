@@ -7,7 +7,7 @@ Audio (Equalizer & Normalizer), Video (ProcAmp), Subtitles, Playback, and Shader
 import os
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, Gdk
 from typing import Any, Callable
 from audio.equalizer import FREQUENCIES, EQUALIZER_PRESETS
 
@@ -42,6 +42,13 @@ class ControlBoxDialog(Gtk.Window):
 
         self.connect("delete-event", lambda w, e: self.hide_on_delete())
         self.connect("show", lambda w: self.update_controls())
+        self.connect("key-press-event", self._on_key_press)
+
+    def _on_key_press(self, widget, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.hide()
+            return True
+        return False
 
     def select_tab(self, index: int) -> None:
         if 0 <= index < self.notebook.get_n_pages():
@@ -149,7 +156,7 @@ class ControlBoxDialog(Gtk.Window):
 
         vbox.pack_start(eq_box, True, True, 0)
 
-        # Audio Enhancement Controls (PotPlayer-style loudness & dialogue clarity)
+        # Audio Enhancement Controls (loudness & dialogue clarity)
         enh_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.enhance_check = Gtk.CheckButton(label="Enable Audio Enhancement (Loudness & Speech Boost)")
         self.enhance_check.set_active(self.player.dsp.enhancement_enabled)

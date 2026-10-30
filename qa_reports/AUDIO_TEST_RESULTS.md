@@ -2,14 +2,14 @@
 
 **Document Version:** 2.0.0 (Hardened & Empirically Verified)  
 **Author:** Senior Audio Software & Multimedia QA Engineer  
-**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/PotPlayer`)  
+**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/Jonaki`)  
 **Date:** 2026-10-28  
 
 ---
 
 ## 1. Executive Summary & Verification Highlights
 
-An empirical audio-engineering audit was performed on the PotPlayer-style Audio Enhancement subsystem of Jonaki Player.
+An empirical audio-engineering audit was performed on the Jonaki-style Audio Enhancement subsystem of Jonaki Player.
 
 All measurements distinguish **discrete sample peak (SP)** from **continuous reconstructed true peak (TP)**, measured using ITU-R BS.1770-4 4x oversampling (`ebur128=peak=true`) and exact sample peak volume detection (`volumedetect`).
 

@@ -38,9 +38,9 @@ tests/audio_corpus/
 *.sqlite3
 *.db
 
-# Proprietary binaries & raw installer extractions
-PotPlayerSetup64.exe
-extracted_potplayer/
+# Binary archives & raw installer extractions
+*.exe
+extracted_*/
 
 # Transient test captures & screenshots
 /*.png

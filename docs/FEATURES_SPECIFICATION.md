@@ -1,6 +1,6 @@
-# Complete Feature Specification: PotPlayer for Linux
+# Complete Feature Specification: Jonaki for Linux
 
-This document details the exhaustive feature matrix of **PotPlayer for Linux**, cataloged directly from the reverse-engineered Windows PotPlayer resource dictionaries (`Language/English.ini`, `Menus/SimpleMenu.xml`, `CmdLine64.txt`) and binary class metadata.
+This document details the exhaustive feature matrix of **Jonaki for Linux**, cataloged directly from the reverse-engineered Windows Jonaki resource dictionaries (`Language/English.ini`, `Menus/SimpleMenu.xml`, `CmdLine64.txt`) and binary class metadata.
 
 ---
 
@@ -89,7 +89,7 @@ This document details the exhaustive feature matrix of **PotPlayer for Linux**, 
 
 ### 1.7 On-Screen Display (OSD) & Playback Info (Tab Key)
 
-Pressing `Tab` opens the iconic PotPlayer Playback Information overlay:
+Pressing `Tab` opens the iconic Jonaki Playback Information overlay:
 - **Container / Format**: File path, container format, overall bitrate, duration.
 - **Video Stream**: Codec FourCC, profile, resolution, display aspect ratio, frame rate (FPS), color space (BT.709, BT.2020), pixel format (YUV420P, YUV420P10LE).
 - **Hardware Decoder**: Active decoder status (`[HW: VAAPI]` or `[SW: FFmpeg]`).
@@ -101,7 +101,7 @@ Pressing `Tab` opens the iconic PotPlayer Playback Information overlay:
 
 ### 1.8 Control Box (F6 Key)
 
-The PotPlayer Control Box provides quick access to five tabbed adjustment panels:
+The Jonaki Control Box provides quick access to five tabbed adjustment panels:
 1. **Audio**: 10-band equalizer sliders, preamp slider, preset selector, 3D spatializer, normalizer toggle.
 2. **Video**: Brightness, Contrast, Saturation, Hue sliders; deinterlacing mode; screen rotation.
 3. **Subtitles**: Subtitle font size, vertical position, horizontal position, sync offset slider.
@@ -112,7 +112,7 @@ The PotPlayer Control Box provides quick access to five tabbed adjustment panels
 
 ## 2. Complete Keyboard Shortcuts Reference
 
-The following table documents the default PotPlayer keyboard shortcut layout replicated in the Linux version:
+The following table documents the default Jonaki keyboard shortcut layout replicated in the Linux version:
 
 | Category | Keybinding | Command ID | Action |
 | :--- | :--- | :--- | :--- |
@@ -167,4 +167,4 @@ The following table documents the default PotPlayer keyboard shortcut layout rep
 | | `F6` | `CMD_CONTROL_BOX` | Open Control Box (Equalizer/Video/Sub) |
 | | `F7` | `CMD_EQUALIZER_DIALOG` | Open Audio Equalizer Panel |
 | | `F8` / `F12` | `CMD_PLAYLIST_WINDOW` | Open Playlist Window |
-| | `F1` | `CMD_ABOUT_DIALOG` | About PotPlayer |
+| | `F1` | `CMD_ABOUT_DIALOG` | About Jonaki |

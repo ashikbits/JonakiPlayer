@@ -36,7 +36,7 @@ class OSDOverlay:
         # 1. Transient OSD Notification (Top Left)
         if not skip_transient_osd and self.message and now < self.message_expire_time:
             cr.save()
-            cr.select_font_face("Segoe UI", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
             cr.set_font_size(18.0)
 
             # Draw text shadow / outline
@@ -53,7 +53,7 @@ class OSDOverlay:
         # 2. Translated AI Subtitle (Bottom Center, positioned above skin bar)
         if self.translated_sub and now < self.translated_sub_expire:
             cr.save()
-            cr.select_font_face("Segoe UI", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
             cr.set_font_size(24.0)
             sub_lines = [l for l in self.translated_sub.split("\n") if l.strip()]
             line_height = 32.0
@@ -70,7 +70,7 @@ class OSDOverlay:
                     cr.move_to(x + dx, y + dy)
                     cr.show_text(line_text)
 
-                # Vibrant PotPlayer gold subtitle text
+                # Vibrant gold subtitle text
                 cr.set_source_rgb(1.0, 0.88, 0.25)
                 cr.move_to(x, y)
                 cr.show_text(line_text)
@@ -87,7 +87,7 @@ class OSDOverlay:
 
         # Semi-transparent dark background card
         card_w = min(560, width - 40)
-        card_h = 320
+        card_h = min(320, max(120, height - 40))
         cr.rectangle(20, 20, card_w, card_h)
         cr.clip()
 
@@ -102,7 +102,7 @@ class OSDOverlay:
         cr.stroke()
 
         # Header Title
-        cr.select_font_face("Segoe UI", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
         cr.set_font_size(13.0)
         cr.set_source_rgb(0.95, 0.75, 0.20)  # Jonaki Gold accent
         cr.move_to(35, 45)
@@ -115,7 +115,7 @@ class OSDOverlay:
         cr.stroke()
 
         # Details list
-        cr.select_font_face("Consolas", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.select_font_face("Monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(11.0)
 
         file_str = str(info.get('file_path') or 'No file loaded')

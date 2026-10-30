@@ -3,7 +3,7 @@
 **Document Version:** 1.0.0  
 **Date:** 2026-10-27  
 **Author:** Senior Software QA Engineer & Linux Desktop Application Tester  
-**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/PotPlayer`)  
+**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/Jonaki`)  
 **Target:** Linux Desktop Media Player (GTK 3 + In-Process libmpv C-FFI)  
 
 ---
@@ -11,7 +11,7 @@
 ## 1. Executive Overview & Scope
 
 ### 1.1 Purpose
-This document establishes the risk-based quality assurance strategy and test plan for **Jonaki Player** (formerly PotPlayer for Linux). Jonaki is a keyboard-driven, low-latency native Linux multimedia player designed to provide feature and workflow parity with Windows PotPlayer by embedding `libmpv` directly in-process via Python C-FFI (`ctypes`) inside a GTK 3 drawing surface.
+This document establishes the risk-based quality assurance strategy and test plan for **Jonaki Player** (formerly Jonaki for Linux). Jonaki is a keyboard-driven, low-latency native Linux multimedia player designed to provide feature and workflow parity with Windows Jonaki by embedding `libmpv` directly in-process via Python C-FFI (`ctypes`) inside a GTK 3 drawing surface.
 
 ### 1.2 Test Scope
 The audit spans all functional and non-functional dimensions of the application:

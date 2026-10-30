@@ -96,8 +96,8 @@
 - **Clean Shutdown**: `JonakiCore.stop_engine()` cleans up all native threads and timers.
 
 ### G. Linux Desktop Integration (`TC-PKG-01` to `TC-PKG-05`, `TC-MPRIS-01` to `TC-MPRIS-08`)
-- **Launchers**: `bin/jonaki` and `bin/potplayer` configure environment and exec Python cleanly.
-- **Desktop Entry**: Validated with `desktop-file-validate` on `jonaki.desktop` and `potplayer.desktop`.
+- **Launchers**: `bin/jonaki` and `bin/jonaki` configure environment and exec Python cleanly.
+- **Desktop Entry**: Validated with `desktop-file-validate` on `jonaki.desktop` and `jonaki.desktop`.
 - **MPRIS2 D-Bus**: Root and Player interfaces, media keys, track properties, playback status, position, and metadata dictionary verified.
 
 ### H. Security and Data Integrity (`TC-SEC-01` to `TC-SEC-05`, `TC-DB-01` to `TC-DB-09`)
@@ -116,7 +116,7 @@
 
 **Execution Timestamp:** 2026-10-27 23:06:31 UTC+6  
 **Runner:** Python Standard Library `unittest` discovery & ElementTree JUnit exporter  
-**JUnit XML Artifact:** [`qa_reports/junit_report.xml`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/junit_report.xml)
+**JUnit XML Artifact:** [`qa_reports/junit_report.xml`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/junit_report.xml)
 
 ### Summary Statistics
 

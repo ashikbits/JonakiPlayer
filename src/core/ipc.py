@@ -25,8 +25,11 @@ def get_default_ipc_socket_path() -> str:
         runtime_dir = f"/tmp/jonaki_{uid}"
         os.makedirs(runtime_dir, mode=0o700, exist_ok=True)
         try:
-            stat_info = os.stat(runtime_dir)
-            if stat_info.st_uid != uid or (stat_info.st_mode & 0o777) != 0o700:
+            stat_info = os.lstat(runtime_dir)
+            if os.path.islink(runtime_dir) or stat_info.st_uid != uid:
+                import tempfile
+                runtime_dir = tempfile.mkdtemp(prefix=f"jonaki_{uid}_")
+            elif (stat_info.st_mode & 0o777) != 0o700:
                 os.chmod(runtime_dir, 0o700)
         except Exception:
             pass
@@ -53,11 +56,14 @@ def _recv_msg(sock: socket.socket) -> Optional[bytes]:
         return None
     if header.startswith(b"{") or header.startswith(b"["):
         chunks = [header]
-        while True:
+        total = len(header)
+        max_size = 2 * 1024 * 1024
+        while total < max_size:
             chunk = sock.recv(65536)
             if not chunk:
                 break
             chunks.append(chunk)
+            total += len(chunk)
         return b"".join(chunks)
     (length,) = struct.unpack(">I", header)
     if length > 32 * 1024 * 1024:
@@ -126,6 +132,12 @@ class IPCServer:
             return True
         except Exception as e:
             print(f"[IPCServer] Failed to bind to {self.socket_path}: {e}")
+            if self._server_socket:
+                try:
+                    self._server_socket.close()
+                except OSError:
+                    pass
+                self._server_socket = None
             self._release_lock()
             return False
 

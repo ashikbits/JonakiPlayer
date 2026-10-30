@@ -59,7 +59,8 @@ class SubtitleSearchClient:
 
         file_size = os.path.getsize(file_path)
         # Query OpenSubtitles API
-        api_url = f"https://rest.opensubtitles.org/search/moviebytesize-{file_size}/moviehash-{file_hash}/sublanguageid-{lang}"
+        safe_lang = urllib.parse.quote(lang, safe="")
+        api_url = f"https://rest.opensubtitles.org/search/moviebytesize-{file_size}/moviehash-{file_hash}/sublanguageid-{safe_lang}"
         req = urllib.request.Request(api_url, headers={"User-Agent": self.user_agent})
         
         results = []
@@ -82,7 +83,8 @@ class SubtitleSearchClient:
         return results
 
     def search_by_query(self, query: str, lang: str = "eng") -> List[Dict[str, Any]]:
-        api_url = f"https://rest.opensubtitles.org/search/query-{urllib.parse.quote(query)}/sublanguageid-{lang}"
+        safe_lang = urllib.parse.quote(lang, safe="")
+        api_url = f"https://rest.opensubtitles.org/search/query-{urllib.parse.quote(query)}/sublanguageid-{safe_lang}"
         req = urllib.request.Request(api_url, headers={"User-Agent": self.user_agent})
         results = []
         try:
@@ -108,6 +110,10 @@ class SubtitleSearchClient:
         Downloads a subtitle file from the given URL and decompresses gzip if necessary.
         """
         if not download_url:
+            return False
+        parsed = urllib.parse.urlsplit(download_url)
+        if parsed.scheme.lower() not in ("http", "https"):
+            print(f"[SubtitleSearch] Blocked non-http download URL: {download_url}")
             return False
         try:
             req = urllib.request.Request(download_url, headers={"User-Agent": self.user_agent})

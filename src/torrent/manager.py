@@ -61,16 +61,17 @@ class TorrentStreamManager:
 
             self.engine = TorrentEngine(download_dir=self.download_dir)
             self.engine.add_torrent(source)
+            engine = self.engine
 
         # Wait for metadata outside the main lock so cancel/status calls are responsive
-        ready = self.engine.wait_for_metadata(timeout=timeout, cancel_event=cancel_event)
+        ready = engine.wait_for_metadata(timeout=timeout, cancel_event=cancel_event)
         if not ready:
             if cancel_event and cancel_event.is_set():
                 raise InterruptedError("Metadata retrieval was cancelled by user.")
-            last_err = self.engine.get_status().error_message
+            last_err = engine.get_status().error_message
             raise TimeoutError(last_err or "Timed out retrieving torrent metadata.")
 
-        status = self.engine.get_status()
+        status = engine.get_status()
         if on_metadata_ready:
             on_metadata_ready(status)
 

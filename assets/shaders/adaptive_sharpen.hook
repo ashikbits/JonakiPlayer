@@ -1,6 +1,6 @@
 //!HOOK MAIN
 //!BIND HOOKED
-//!DESC PotPlayer Adaptive Sharpen Shader
+//!DESC Adaptive Sharpen Shader
 
 vec4 hook() {
     vec2 pt = HOOKED_pt;

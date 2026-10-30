@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import gzip
+import json
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -50,7 +51,7 @@ class TestSubtitleAndMPRIS(unittest.TestCase):
 
     def test_subtitle_download_and_gzip_decompression(self):
         client = SubtitleSearchClient()
-        test_content = b"1\n00:00:01,000 --> 00:00:04,000\nHello World PotPlayer\n"
+        test_content = b"1\n00:00:01,000 --> 00:00:04,000\nHello World Jonaki\n"
         compressed = gzip.compress(test_content)
 
         with tempfile.NamedTemporaryFile(suffix=".srt", delete=False) as tf:
@@ -95,6 +96,40 @@ class TestSubtitleAndMPRIS(unittest.TestCase):
         self.assertIn(("One", "auto", "en"), translator._cache)
         self.assertIn(("Three", "auto", "en"), translator._cache)
         self.assertIn(("Four", "auto", "en"), translator._cache)
+
+    def test_local_llm_openai_compatible_translation(self):
+        # Verifies LM Studio / vLLM / OpenAI schema compatibility
+        translator = SubtitleTranslator(
+            provider="local_llm",
+            local_endpoint="http://localhost:1234/v1/chat/completions",
+            local_model="llama-3.2"
+        )
+        fake_api_response = json.dumps({
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Bonjour le monde"
+                    }
+                }
+            ]
+        }).encode("utf-8")
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = fake_api_response
+            mock_resp.__enter__.return_value = mock_resp
+            mock_urlopen.return_value = mock_resp
+
+            result = translator.translate("Hello world", src_lang="en", dst_lang="fr")
+            self.assertEqual(result, "Bonjour le monde")
+
+            # Verify POST payload sent was OpenAI messages array format
+            called_req = mock_urlopen.call_args[0][0]
+            sent_payload = json.loads(called_req.data.decode("utf-8"))
+            self.assertIn("messages", sent_payload)
+            self.assertEqual(sent_payload["model"], "llama-3.2")
+            self.assertEqual(sent_payload["messages"][1]["content"], "Hello world")
 
     def test_mpris2_introspection_xml(self):
         node = Gio.DBusNodeInfo.new_for_xml(MPRIS_INTROSPECTION_XML)

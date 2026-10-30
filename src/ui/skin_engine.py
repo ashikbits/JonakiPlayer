@@ -1,7 +1,7 @@
 """
 Jonaki for Linux - DSF Skin Parser & Cairo Sprite Renderer
 Parses authentic .dsf ZIP archives, extracts sprite sheets, and renders
-the pixel-accurate user interface inspired by PotPlayer.
+the pixel-accurate user interface.
 """
 
 import os
@@ -62,7 +62,7 @@ class SkinSlider:
 
 
 def clean_codec_name(raw: str) -> str:
-    """Normalizes raw codec strings to short PotPlayer badge labels."""
+    """Normalizes raw codec strings to short badge labels."""
     if not raw:
         return ""
     u = raw.upper()
@@ -98,8 +98,8 @@ def clean_codec_name(raw: str) -> str:
 
 class PotSkinEngine:
     """
-    Extracts and parses PotPlayer .dsf skins into Cairo image surfaces and renders
-    the authentic sprite-based PotPlayer user interface.
+    Extracts and parses .dsf skins into Cairo image surfaces and renders
+    the authentic sprite-based user interface.
     """
     def __init__(self, dsf_path: Optional[str] = None):
         if dsf_path is None:
@@ -116,22 +116,39 @@ class PotSkinEngine:
         self._load_dsf()
 
     def _load_dsf(self) -> None:
+        # Load native Jonaki logo asset if available on disk
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        jonaki_logo_candidates = [
+            os.path.join(base_dir, "assets", "logos", "jonaki.png"),
+            os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps/jonaki.png"),
+            "/usr/share/icons/hicolor/256x256/apps/jonaki.png",
+        ]
+        for candidate in jonaki_logo_candidates:
+            if os.path.exists(candidate):
+                try:
+                    self.surfaces["jonaki.png"] = cairo.ImageSurface.create_from_png(candidate)
+                    break
+                except Exception as e:
+                    print(f"[SkinEngine] Error loading logo {candidate}: {e}")
+
         if not os.path.exists(self.dsf_path):
-            print(f"[PotSkinEngine] Skin not found: {self.dsf_path}")
+            print(f"[SkinEngine] Skin not found: {self.dsf_path}")
             return
 
         try:
             with zipfile.ZipFile(self.dsf_path, "r") as z:
-                for filename in ["Main.png", "BRTool.png", "Window.png", "Control.png", "Slider.png", "PotPlayer.png"]:
-                    if filename in z.namelist():
+                for filename in z.namelist():
+                    if filename.lower().endswith(".png"):
                         png_bytes = z.read(filename)
                         try:
                             surf = cairo.ImageSurface.create_from_png(io.BytesIO(png_bytes))
                             self.surfaces[filename] = surf
+                            if "logo" in filename.lower() or "player" in filename.lower():
+                                self.surfaces.setdefault("dsf_logo.png", surf)
                         except Exception as e:
-                            print(f"[PotSkinEngine] Error loading {filename}: {e}")
+                            print(f"[SkinEngine] Error loading {filename}: {e}")
         except Exception as e:
-            print(f"[PotSkinEngine] Failed to open DSF archive: {e}")
+            print(f"[SkinEngine] Failed to open DSF archive: {e}")
 
     def _init_default_controls(self) -> None:
         """
@@ -321,7 +338,7 @@ class PotSkinEngine:
                bookmarks: Optional[List[float]] = None,
                media_info: Optional[Dict[str, Any]] = None) -> None:
         """
-        Renders the complete PotPlayer control bar surface using authentic DSF sprites.
+        Renders the complete control bar surface using authentic DSF sprites.
         """
         self.layout(panel_width, panel_height, is_playing=is_playing)
         main_surf = self.surfaces.get("Main.png")
@@ -349,7 +366,10 @@ class PotSkinEngine:
         # 2. Upper Strip: Timebar Seek Slider
         if self.timebar:
             tx, ty, tw, th = self.timebar.rect
-            progress = (position_sec / duration_sec) if duration_sec > 0 else 0.0
+            if getattr(self.timebar, "is_dragging", False) and getattr(self.timebar, "drag_ratio", None) is not None:
+                progress = self.timebar.drag_ratio
+            else:
+                progress = (position_sec / duration_sec) if duration_sec > 0 else 0.0
             progress = max(0.0, min(1.0, progress))
 
             # Background track (0, 193, 95, 10)
@@ -379,7 +399,7 @@ class PotSkinEngine:
                 cr.paint()
                 cr.restore()
 
-            # Bookmarks pins (PotPlayer authentic gold markers)
+            # Bookmarks pins (gold markers)
             if bookmarks and duration_sec > 0:
                 for bm_pts in bookmarks:
                     bm_x = max(tx, min(tx + tw, tx + int((bm_pts / duration_sec) * tw)))
@@ -474,13 +494,13 @@ class PotSkinEngine:
             cr.paint()
             cr.restore()
 
-        # 5. Lower Strip: Time Labels (Segoe UI / Tahoma 11pt, clean PotPlayer style)
+        # 5. Lower Strip: Time Labels (Sans 11pt)
         curr_str = self._format_time(position_sec)
         total_str = self._format_time(duration_sec)
         time_x = 215
         time_base_y = lower_y + (lower_h // 2) + 4
 
-        cr.select_font_face("Tahoma", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         cr.set_font_size(11.0)
 
         # Current time

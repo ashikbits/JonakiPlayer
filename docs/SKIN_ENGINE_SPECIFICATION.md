@@ -1,6 +1,6 @@
-# Skin Engine Specification: PotPlayer DSF Architecture
+# Skin Engine Specification: Jonaki DSF Architecture
 
-This document specifies the internal structure, layout grammar, and rendering pipeline of PotPlayer's **DSF (Daum Skin Format)** skin engine, reverse-engineered from `extracted_potplayer/Skins/Default.dsf` and `PotPlayer64.dll`.
+This document specifies the internal structure, layout grammar, and rendering pipeline of Jonaki's **DSF (Daum Skin Format)** skin engine, reverse-engineered from `extracted_jonaki/Skins/Default.dsf` and `Jonaki64.dll`.
 
 ---
 
@@ -30,7 +30,7 @@ Default.dsf (ZIP Archive)
 
 ## 2. Layout XML/TXT Grammar
 
-PotPlayer's layout engine uses an XML-like tag hierarchy combined with preprocessor directives (`#include`, `#if`, `#else`, `#endif`).
+Jonaki's layout engine uses an XML-like tag hierarchy combined with preprocessor directives (`#include`, `#if`, `#else`, `#endif`).
 
 ### 2.1 Supported Elements
 
@@ -47,7 +47,7 @@ PotPlayer's layout engine uses an XML-like tag hierarchy combined with preproces
 
 ## 3. Sprite Sheet Coordinate System & 9-Slice Blitting
 
-In PotPlayer DSF skins, individual UI assets are not stored as separate files. Instead, they reside on shared sprite atlases (primarily `Main.png`, `BRTool.png`, and `Window.png`).
+In Jonaki DSF skins, individual UI assets are not stored as separate files. Instead, they reside on shared sprite atlases (primarily `Main.png`, `BRTool.png`, and `Window.png`).
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -118,7 +118,7 @@ The seekbar is defined in `BottomVideo.txt` as:
 
 ## 5. Bottom Bar Status Badges
 
-PotPlayer features interactive status badges embedded directly in the bottom control bar:
+Jonaki features interactive status badges embedded directly in the bottom control bar:
 
 ```
 [ ▶ ] [ ⏸ ] [ ⏹ ] [ ◀◀ ] [ ▶▶ ] [ 📂 ]  00:14:22 / 02:18:40  [ HW ] [ HDR ] [ H264 ] [ AAC ] [ 2.0 ]   🔊 ━━●━━

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """
 Jonaki for Linux - Main Entry Point & Command Line Switch Parser
-Full CLI compatibility and PotPlayer-style switches.
+Full CLI compatibility and desktop player switches.
 Supports /filedlg, /seek=, /sub=, /aud=, /user_agent=, /new, /current, and stdin (-) streaming.
 """
 
@@ -10,13 +10,24 @@ import os
 import sys
 
 def ensure_x11_backend() -> None:
+    if os.environ.get("JONAKI_REEXEC") == "1":
+        return
     # Guarantee X11 surface embedding under Wayland / XWayland
+    needs_reexec = False
     if os.environ.get("GDK_BACKEND") != "x11":
         os.environ["GDK_BACKEND"] = "x11"
+        needs_reexec = True
+    if "WAYLAND_DISPLAY" in os.environ:
+        os.environ.pop("WAYLAND_DISPLAY", None)
+        needs_reexec = True
+    if needs_reexec:
+        os.environ["JONAKI_REEXEC"] = "1"
         try:
+            sys.stdout.flush()
+            sys.stderr.flush()
             os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception as e:
-            print(f"[Jonaki] Warning: Failed to re-exec with GDK_BACKEND=x11: {e}", file=sys.stderr)
+            print(f"[Jonaki] Warning: Failed to re-exec with X11 backend: {e}", file=sys.stderr)
 
 
 if not os.environ.get("VDPAU_DRIVER"):
@@ -31,14 +42,33 @@ try:
     _libc.setlocale.argtypes = [ctypes.c_int, ctypes.c_char_p]
     _libc.setlocale.restype = ctypes.c_char_p
     _libc.setlocale(1, b"C")
+    # PR_SET_NAME = 15: Set Linux process comm name to "jonaki"
+    _libc.prctl(15, b"jonaki", 0, 0, 0)
 except Exception:
     pass
+
+# Audio server process identification (PipeWire & PulseAudio)
+os.environ.setdefault("PULSE_PROP", (
+    "application.name='Jonaki' "
+    "application.process.binary='jonaki' "
+    "application.id='jonaki' "
+    "application.desktop-entry='jonaki' "
+    "application.icon_name='jonaki' "
+    "media.role='video'"
+))
+os.environ.setdefault("PIPEWIRE_APP_NAME", "Jonaki")
+os.environ.setdefault("PIPEWIRE_APP_ICON", "jonaki")
+os.environ.setdefault("PIPEWIRE_APP_ID", "jonaki")
 
 import glob
 import subprocess
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk, GLib, GdkPixbuf
+
+# Set desktop prgname before Gtk.init so window managers and compositors map to jonaki.desktop
+GLib.set_prgname("jonaki")
+GLib.set_application_name("Jonaki")
 
 try:
     _libc.setlocale(1, b"C")
@@ -49,7 +79,7 @@ except Exception:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.ipc import IPCClient, IPCServer
-from ui.main_window import JonakiMainWindow, PotPlayerMainWindow
+from ui.main_window import JonakiMainWindow
 
 
 def parse_seek_time(seek_str: str) -> float:
@@ -240,7 +270,32 @@ def parse_arguments(argv: list) -> dict:
 
 def main():
     ensure_x11_backend()
+    GLib.set_prgname("jonaki")
+    GLib.set_application_name("Jonaki")
     Gtk.init_check(None)
+
+    # Set multi-resolution default window icon early so all dialogs and windows inherit it
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    icon_candidates = [
+        os.path.join(base_dir, "assets", "logos", "jonaki.png"),
+        os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps/jonaki.png"),
+        "/usr/share/icons/hicolor/256x256/apps/jonaki.png",
+    ]
+    sizes = [16, 24, 32, 48, 64, 128, 256]
+    for icon_path in icon_candidates:
+        if os.path.exists(icon_path):
+            try:
+                pixbufs = [GdkPixbuf.Pixbuf.new_from_file_at_scale(icon_path, s, s, True) for s in sizes]
+                Gtk.Window.set_default_icon_list(pixbufs)
+                Gtk.Window.set_default_icon_name("jonaki")
+                break
+            except Exception:
+                try:
+                    Gtk.Window.set_default_icon_from_file(icon_path)
+                    break
+                except Exception:
+                    pass
+
     options = parse_arguments(sys.argv)
 
     # Handle single instance /current unless /new was specified
@@ -254,7 +309,10 @@ def main():
                 "seek": options["seek"],
                 "add": options["add"],
                 "sub": options["sub"],
-                "aud": options["aud"]
+                "aud": options["aud"],
+                "volume": options["volume"],
+                "title": options["title"],
+                "config": options["config"],
             }
             res = client.send_command(payload)
             if res and res.get("status") == "ok":
@@ -293,9 +351,18 @@ def main():
             seek_val = msg.get("seek", 0.0)
             sub_val = msg.get("sub")
             aud_val = msg.get("aud")
+            vol_val = msg.get("volume")
+            title_val = msg.get("title")
+
+            if vol_val is not None:
+                GLib.idle_add(win.core.set_volume, vol_val)
+
+            if title_val:
+                GLib.idle_add(win.set_title, f"Jonaki - {title_val}")
+
             if items:
-                # not add_mode means clear existing and play immediately
-                GLib.idle_add(win.add_files_to_playlist, items, True, not add_mode, seek_val, sub_val, aud_val)
+                # If add_mode is True, don't interrupt current playback (auto_play=False, clear_existing=False)
+                GLib.idle_add(win.add_files_to_playlist, items, not add_mode, not add_mode, seek_val, sub_val, aud_val)
             else:
                 if sub_val:
                     GLib.idle_add(win.core.load_subtitle, sub_val)

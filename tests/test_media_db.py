@@ -33,6 +33,19 @@ class TestMediaDatabase(unittest.TestCase):
         finished_pos = self.db.get_playback_position(finished_file)
         self.assertEqual(finished_pos, 0.0)
 
+        # Re-opening completed video (position=0.0) must not corrupt completion state or reset position to 3500.0
+        self.db.save_playback_position(finished_file, position=0.0, duration=3600.0)
+        reopened_pos = self.db.get_playback_position(finished_file)
+        self.assertEqual(reopened_pos, 0.0)
+
+        # Playing past 5 seconds updates resume position properly
+        self.db.save_playback_position(finished_file, position=25.0, duration=3600.0)
+        self.assertEqual(self.db.get_playback_position(finished_file), 25.0)
+
+        # Explicit reset resets position to 0.0
+        self.db.reset_playback_position(finished_file)
+        self.assertEqual(self.db.get_playback_position(finished_file), 0.0)
+
     def test_bookmarks(self):
         file_path = "/home/user/movie.mkv"
         bm_id = self.db.add_bookmark(file_path, timestamp=65.0, title="Intro Scene")

@@ -77,7 +77,7 @@ class TestJonakiCLI(unittest.TestCase):
         self.assertIsNone(opts3["volume"])
 
     def test_additional_cli_switches(self):
-        # BUG 1.4: Comprehensive coverage for all supported PotPlayer CLI switches
+        # Comprehensive coverage for all supported CLI switches
         args = [
             "jonaki",
             "/urldlg",

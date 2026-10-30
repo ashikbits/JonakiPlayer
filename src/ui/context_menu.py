@@ -247,6 +247,7 @@ class PotContextMenu:
         # 1. Audio Tracks
         for child in self.audio_streams_menu.get_children():
             self.audio_streams_menu.remove(child)
+            child.destroy()
 
         a_tracks = core.get_audio_tracks() if hasattr(core, "get_audio_tracks") else []
         cur_aid = core.get_current_audio_track_id() if hasattr(core, "get_current_audio_track_id") else None
@@ -279,6 +280,7 @@ class PotContextMenu:
         # 2. Subtitle Tracks
         for child in self.sub_streams_menu.get_children():
             self.sub_streams_menu.remove(child)
+            child.destroy()
 
         sub_tracks = core.get_subtitle_tracks() if hasattr(core, "get_subtitle_tracks") else []
         cur_sid = core.get_current_subtitle_track_id() if hasattr(core, "get_current_subtitle_track_id") else None
@@ -310,6 +312,7 @@ class PotContextMenu:
         # 3. Secondary Subtitles (Dual Subtitles)
         for child in self.sub_sec_streams_menu.get_children():
             self.sub_sec_streams_menu.remove(child)
+            child.destroy()
 
         cur_sec_sid = core.get_current_secondary_subtitle_track_id() if hasattr(core, "get_current_secondary_subtitle_track_id") else None
         dis_sec_prefix = "✓ " if (not cur_sec_sid or cur_sec_sid == "no") else "   "

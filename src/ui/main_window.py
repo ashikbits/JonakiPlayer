@@ -12,11 +12,11 @@ import threading
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
 import cairo
 from typing import Optional, List, Dict, Any
 
-from core.engine import JonakiCore, PotPlayerCore, PlaybackState
+from core.engine import JonakiCore, PlaybackState
 from core.media_db import MediaDatabase
 from core.mpris import MPRIS2Service
 from ui.skin_engine import PotSkinEngine
@@ -42,6 +42,40 @@ class JonakiMainWindow(Gtk.Window):
         self.set_default_size(960, 580)
         self.set_position(Gtk.WindowPosition.CENTER)
 
+        # Configure application and window icon (multi-resolution hierarchy)
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        icon_candidates = [
+            os.path.join(base_dir, "assets", "logos", "jonaki.png"),
+            os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps/jonaki.png"),
+            "/usr/share/icons/hicolor/256x256/apps/jonaki.png",
+        ]
+        sizes = [16, 24, 32, 48, 64, 128, 256]
+        for icon_path in icon_candidates:
+            if os.path.exists(icon_path):
+                try:
+                    pixbufs = [GdkPixbuf.Pixbuf.new_from_file_at_scale(icon_path, s, s, True) for s in sizes]
+                    self.set_icon_list(pixbufs)
+                    Gtk.Window.set_default_icon_list(pixbufs)
+                    Gtk.Window.set_default_icon_name("jonaki")
+                    break
+                except Exception:
+                    try:
+                        self.set_icon_from_file(icon_path)
+                        Gtk.Window.set_default_icon_from_file(icon_path)
+                        break
+                    except Exception:
+                        pass
+
+        # Set WM_CLASS and WM_WINDOW_ROLE explicitly for X11 / XWayland window managers
+        try:
+            self.set_wmclass("jonaki", "Jonaki")
+        except Exception:
+            pass
+        try:
+            self.set_role("jonaki")
+        except Exception:
+            pass
+
         # Set RGBA visual for true alpha channel transparency over OpenGL
         screen = self.get_screen()
         rgba = screen.get_rgba_visual() if screen else None
@@ -52,7 +86,7 @@ class JonakiMainWindow(Gtk.Window):
         self.db = db if db is not None else MediaDatabase()
         self.equalizer = EqualizerModel()
         self.dsp = AudioDSPChain()
-        # PotPlayer-style Audio Enhancement preferences (enabled by default on fresh installation)
+        # Audio Enhancement preferences (enabled by default on fresh installation)
         enh_enabled_saved = self.db.get_setting("audio_enhancement_enabled", "1")
         enh_preset_saved = self.db.get_setting("audio_enhancement_preset", "Balanced / Default")
         enh_gain_saved = self.db.get_setting("audio_enhancement_gain", "5.0")
@@ -82,6 +116,9 @@ class JonakiMainWindow(Gtk.Window):
         self._is_keep_above: bool = False
         self._click_timer_id: Optional[int] = None
         self._translation_seq: int = 0
+        self._last_sub_text: str = ""
+        self._trans_in_progress: bool = False
+        self._pending_trans: Optional[tuple] = None
 
         # Root vertical layout box
         self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -89,9 +126,10 @@ class JonakiMainWindow(Gtk.Window):
 
         # Core Playback Engine (libmpv C-FFI)
         self.core = JonakiCore()
-        self.core.on_time_update = self._on_core_time_update
-        self.core.on_state_change = self._on_core_state_change
-        self.core.on_file_end = self._on_core_file_end
+        self.core.on_time_update = lambda pos, dur: GLib.idle_add(self._on_core_time_update, pos, dur)
+        self.core.on_state_change = lambda st: GLib.idle_add(self._on_core_state_change, st)
+        self.core.on_file_end = lambda: GLib.idle_add(self._on_core_file_end)
+        self.core.on_audio_filter_sync = lambda: GLib.idle_add(self.apply_audio_filters)
 
         # Route OSD messages to native GPU engine during active playback or paused file
         orig_show_osd = self.osd.show_osd
@@ -288,15 +326,11 @@ class JonakiMainWindow(Gtk.Window):
                 self._last_sub_text = sub_text
                 self._translation_seq += 1
                 seq = self._translation_seq
-                import threading
-                def _trans_worker(txt=sub_text, dst=self.sub_mgr.target_language, current_seq=seq):
-                    tr = self.translator.translate(txt, dst_lang=dst)
-                    def _update():
-                        if current_seq == self._translation_seq:
-                            self.osd.set_translated_sub(tr, 4.0)
-                        return False
-                    GLib.idle_add(_update)
-                threading.Thread(target=_trans_worker, daemon=True).start()
+                dst = self.sub_mgr.target_language
+                if self._trans_in_progress:
+                    self._pending_trans = (sub_text, dst, seq)
+                else:
+                    self._start_translation_worker(sub_text, dst, seq)
             elif not sub_text and getattr(self, "_last_sub_text", ""):
                 self._last_sub_text = ""
 
@@ -336,6 +370,22 @@ class JonakiMainWindow(Gtk.Window):
                 self._controls_visible = True
         return True
 
+    def _start_translation_worker(self, txt: str, dst: str, seq: int) -> None:
+        self._trans_in_progress = True
+        def _trans_worker():
+            tr = self.translator.translate(txt, dst_lang=dst)
+            def _finish():
+                self._trans_in_progress = False
+                if seq == self._translation_seq:
+                    self.osd.set_translated_sub(tr, 4.0)
+                if self._pending_trans is not None:
+                    next_txt, next_dst, next_seq = self._pending_trans
+                    self._pending_trans = None
+                    self._start_translation_worker(next_txt, next_dst, next_seq)
+                return False
+            GLib.idle_add(_finish)
+        threading.Thread(target=_trans_worker, daemon=True).start()
+
     # --- Draw Handlers ---
 
     def _on_draw_video_area(self, widget, cr: cairo.Context):
@@ -348,20 +398,110 @@ class JonakiMainWindow(Gtk.Window):
         cr.paint()
         cr.restore()
 
-        # If no video is playing and no file loaded, draw PotPlayer logo background
+        # If no video is playing and no file loaded, draw logo background
         if self.core.state in (PlaybackState.IDLE, PlaybackState.STOPPED) and not self.core.current_file:
-            cr.set_source_rgb(0.08, 0.08, 0.09)
+            logo_surf = (
+                self.skin.surfaces.get("jonaki.png")
+                or self.skin.surfaces.get("Jonaki.png")
+                or self.skin.surfaces.get("dsf_logo.png")
+            )
+
+            is_dsf = bool(
+                logo_surf
+                and (
+                    logo_surf is self.skin.surfaces.get("dsf_logo.png")
+                )
+            )
+
+            # Match background canvas to logo palette
+            if is_dsf:
+                # DSF bitmap background is ~#101010
+                cr.set_source_rgb(0.063, 0.063, 0.063)
+            elif logo_surf:
+                # Jonaki logo background is deep dark #020203
+                cr.set_source_rgb(0.01, 0.01, 0.015)
+            else:
+                cr.set_source_rgb(0.05, 0.05, 0.06)
+
             cr.rectangle(0, 0, w, h)
             cr.fill()
 
-            logo_surf = self.skin.surfaces.get("jonaki.png") or self.skin.surfaces.get("Jonaki.png") or self.skin.surfaces.get("PotPlayer.png") or self.skin.surfaces.get("Main.png")
-            cr.select_font_face("Segoe UI", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-            cr.set_font_size(24.0)
-            cr.set_source_rgb(0.4, 0.4, 0.45)
-            text = "Jonaki"
-            ext = cr.text_extents(text)
-            cr.move_to((w - ext.width) / 2, (h / 2) + 10)
-            cr.show_text(text)
+            if logo_surf:
+                surf_w = logo_surf.get_width()
+                surf_h = logo_surf.get_height()
+                if surf_w > 0 and surf_h > 0:
+                    if is_dsf:
+                        # DSF logo is 596x443 with embedded typography
+                        max_w = min(596.0, max(120.0, w * 0.85))
+                        max_h = min(443.0, max(100.0, h * 0.85))
+                        scale = min(max_w / surf_w, max_h / surf_h)
+                        draw_w = surf_w * scale
+                        draw_h = surf_h * scale
+                        draw_x = (w - draw_w) / 2.0
+                        draw_y = (h - draw_h) / 2.0
+
+                        cr.save()
+                        cr.translate(draw_x, draw_y)
+                        cr.scale(scale, scale)
+                        cr.set_source_surface(logo_surf, 0, 0)
+                        cr.paint()
+                        cr.restore()
+                    else:
+                        # Jonaki emblem logo (square/circular emblem)
+                        max_w = min(220.0, max(32.0, w * 0.4))
+                        max_h = min(220.0, max(32.0, h * 0.35))
+                        scale = min(max_w / surf_w, max_h / surf_h)
+                        draw_w = surf_w * scale
+                        draw_h = surf_h * scale
+                        draw_x = (w - draw_w) / 2.0
+                        draw_y = max(10.0, (h - draw_h) / 2.0 - (20.0 if h >= 220 else 0.0))
+
+                        cr.save()
+                        cr.translate(draw_x, draw_y)
+                        cr.scale(scale, scale)
+                        cr.set_source_surface(logo_surf, 0, 0)
+                        cr.paint()
+                        cr.restore()
+
+                        # Jonaki typography below emblem if vertical space permits
+                        if h >= 200:
+                            cr.save()
+                            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                            cr.set_font_size(20.0)
+                            cr.set_source_rgb(0.85, 0.85, 0.9)
+                            title_text = "Jonaki"
+                            ext = cr.text_extents(title_text)
+                            title_y = draw_y + draw_h + 28.0
+                            cr.move_to((w - ext.width) / 2.0, title_y)
+                            cr.show_text(title_text)
+
+                            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+                            cr.set_font_size(12.0)
+                            cr.set_source_rgb(0.48, 0.5, 0.55)
+                            sub_text = "Multimedia Player"
+                            ext_sub = cr.text_extents(sub_text)
+                            cr.move_to((w - ext_sub.width) / 2.0, title_y + 18.0)
+                            cr.show_text(sub_text)
+                            cr.restore()
+            else:
+                # Vector fallback when no bitmap logo is found
+                cr.save()
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+                cr.set_font_size(26.0)
+                cr.set_source_rgb(0.55, 0.55, 0.6)
+                text = "Jonaki"
+                ext = cr.text_extents(text)
+                cr.move_to((w - ext.width) / 2.0, (h / 2.0) - 2.0)
+                cr.show_text(text)
+
+                cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+                cr.set_font_size(13.0)
+                cr.set_source_rgb(0.38, 0.4, 0.44)
+                sub_text = "Multimedia Player"
+                ext_sub = cr.text_extents(sub_text)
+                cr.move_to((w - ext_sub.width) / 2.0, (h / 2.0) + 24.0)
+                cr.show_text(sub_text)
+                cr.restore()
 
         # Draw OSD notifications and Tab Technical Info HUD
         info = {
@@ -483,11 +623,10 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
         elif event.direction == Gdk.ScrollDirection.SMOOTH:
             _, delta_y = event.get_scroll_deltas()
-            if delta_y < 0:
-                self.core.adjust_volume(+2.0)
-                self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
-            elif delta_y > 0:
-                self.core.adjust_volume(-2.0)
+            if abs(delta_y) > 0.01:
+                step = max(0.5, min(5.0, abs(delta_y) * 2.0))
+                change = +step if delta_y < 0 else -step
+                self.core.adjust_volume(change)
                 self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
         return True
 
@@ -513,6 +652,7 @@ class JonakiMainWindow(Gtk.Window):
                 self.skin.volume_slider.state = 2  # Down
                 vx, vy, vw, vh = self.skin.volume_slider.rect
                 ratio = max(0.0, min(1.0, (event.x - vx) / vw))
+                self.skin.volume_slider.value = ratio
                 self.core.set_volume(ratio * 100.0)
             elif hasattr(hit, "cmd_id"):
                 hit.state = 2  # Pressed
@@ -540,6 +680,7 @@ class JonakiMainWindow(Gtk.Window):
         elif self.skin.volume_slider and self.skin.volume_slider.is_dragging:
             vx, vy, vw, vh = self.skin.volume_slider.rect
             ratio = max(0.0, min(1.0, (x - vx) / vw))
+            self.skin.volume_slider.value = ratio
             self.core.set_volume(ratio * 100.0)
         else:
             if self.skin.timebar:
@@ -549,6 +690,7 @@ class JonakiMainWindow(Gtk.Window):
                 vx, vy, vw, vh = self.skin.volume_slider.rect
                 self.skin.volume_slider.state = 1 if (vx <= x <= vx + vw and vy - 3 <= y <= vy + vh + 4) else 0
             is_playing = (self.core.state == PlaybackState.PLAYING)
+            hovered_tooltip = None
             for btn in self.skin.buttons + self.skin.badges:
                 if btn == self.skin.btn_play and is_playing:
                     btn.state = 0
@@ -559,8 +701,11 @@ class JonakiMainWindow(Gtk.Window):
                 bx, by, bw, bh = btn.rect
                 if bx <= x <= bx + bw and by <= y <= by + bh:
                     btn.state = 1  # Hover
+                    if getattr(btn, "tooltip", None):
+                        hovered_tooltip = btn.tooltip
                 else:
                     btn.state = 0
+            widget.set_tooltip_text(hovered_tooltip)
         self.skin_area.queue_draw()
 
     # --- Keyboard Shortcut Dispatcher ---
@@ -753,7 +898,7 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd(f"Auto Volume Control (Normalizer): {'ON' if self.dsp.normalizer_enabled else 'OFF'}")
             return True
 
-        # Shift+E: Toggle Audio Enhancement (PotPlayer-style loudness & speech boost)
+        # Shift+E: Toggle Audio Enhancement (loudness & speech boost)
         if shift and keyval in (Gdk.KEY_e, Gdk.KEY_E) and not (ctrl or alt):
             self.toggle_audio_enhancement()
             return True
@@ -1716,8 +1861,11 @@ class JonakiMainWindow(Gtk.Window):
             on_start_playback=self._on_torrent_stream_started,
             initial_source=initial_source,
         )
-        dialog.run()
-        dialog.destroy()
+        try:
+            dialog.run()
+        finally:
+            if not getattr(dialog, "_is_destroyed", False):
+                dialog.destroy()
 
     def _on_torrent_stream_started(self, stream_url: str, title: str) -> None:
         display_title = f"[Torrent] {title}"
@@ -1824,7 +1972,7 @@ class JonakiMainWindow(Gtk.Window):
         about.set_program_name("Jonaki")
         about.set_version("1.0.0 (Linux Native)")
         about.set_copyright("Jonaki Open Source Project")
-        about.set_comments("Modern high-performance media player for Linux, inspired by PotPlayer.\nNative in-process libmpv hardware playback with zero external dependencies.")
+        about.set_comments("Modern high-performance media player for Linux.\nNative in-process libmpv hardware playback with zero external dependencies.")
         about.set_license_type(Gtk.License.GPL_3_0)
         about.set_website("https://github.com/ashik-himel/JonakiPlayer")
         about.run()
@@ -1851,7 +1999,3 @@ class JonakiMainWindow(Gtk.Window):
         self.core.stop_engine()
         if Gtk.main_level() > 0:
             Gtk.main_quit()
-
-
-# Backward compatibility alias
-PotPlayerMainWindow = JonakiMainWindow

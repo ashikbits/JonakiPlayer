@@ -83,6 +83,39 @@ class TestJonakiIPC(unittest.TestCase):
         self.assertIsNotNone(res)
         self.assertEqual(res.get("status"), "ok")
 
+    def test_ipc_open_command_with_add_mode_and_extended_options(self):
+        sock_path = f"/tmp/test_jonaki_ipc_opts_{os.getpid()}.sock"
+        received = []
+
+        def handler(msg):
+            received.append(msg)
+            return {"status": "ok"}
+
+        server = IPCServer(handler, socket_path=sock_path)
+        self.assertTrue(server.start())
+        self.addCleanup(server.stop)
+
+        client = IPCClient(socket_path=sock_path)
+        payload = {
+            "command": "open",
+            "items": ["/media/video2.mp4"],
+            "seek": 120.0,
+            "add": True,
+            "sub": "/media/video2.srt",
+            "aud": None,
+            "volume": 85.0,
+            "title": "Episode 2",
+            "config": "Default"
+        }
+        res = client.send_command(payload)
+        self.assertEqual(res.get("status"), "ok")
+        self.assertEqual(len(received), 1)
+        msg = received[0]
+        self.assertEqual(msg.get("volume"), 85.0)
+        self.assertEqual(msg.get("title"), "Episode 2")
+        self.assertTrue(msg.get("add"))
+        self.assertEqual(msg.get("seek"), 120.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 # Subtitle Engine & AI Translation Specification
 
-This document details the subtitle rendering, multi-track composition, real-time AI translation, and speech-to-text subtitle generation pipelines of PotPlayer for Linux, reverse-engineered from `ATextOut64.dll`, `Module/Whisper/Vulkan/`, and the `Extension/Subtitle/` scripts.
+This document details the subtitle rendering, multi-track composition, real-time AI translation, and speech-to-text subtitle generation pipelines of Jonaki for Linux, reverse-engineered from `ATextOut64.dll`, `Module/Whisper/Vulkan/`, and the `Extension/Subtitle/` scripts.
 
 ---
 
@@ -20,7 +20,7 @@ This document details the subtitle rendering, multi-track composition, real-time
 
 ## 2. Simultaneous Multi-Track Display Pipeline
 
-A signature capability of PotPlayer is displaying multiple subtitle streams simultaneously. For example, language learners frequently display English subtitles along with Japanese or Spanish subtitles concurrently:
+A signature capability of Jonaki is displaying multiple subtitle streams simultaneously. For example, language learners frequently display English subtitles along with Japanese or Spanish subtitles concurrently:
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -49,7 +49,7 @@ A signature capability of PotPlayer is displaying multiple subtitle streams simu
 
 ## 3. Real-Time Subtitle Translation Engine
 
-PotPlayer ships with an extensible AngelScript translation system located in `Extension/Subtitle/Translate/`. In PotPlayer for Linux, this is implemented as an asynchronous translation pipeline:
+Jonaki ships with an extensible AngelScript translation system located in `Extension/Subtitle/Translate/`. In Jonaki for Linux, this is implemented as an asynchronous translation pipeline:
 
 ```mermaid
 sequenceDiagram
@@ -92,7 +92,7 @@ sequenceDiagram
 
 ## 4. Real-Time Speech-to-Text Subtitle Generation (Whisper AI)
 
-In `extracted_potplayer/Module/Whisper/Vulkan/`, PotPlayer includes a Vulkan-accelerated Whisper model. For Linux, we implement:
+In `extracted_jonaki/Module/Whisper/Vulkan/`, Jonaki includes a Vulkan-accelerated Whisper model. For Linux, we implement:
 
 1. **Audio Extraction Pipeline**: Audio samples from the active stream are tapped via a circular ring buffer (16 kHz, 16-bit mono PCM).
 2. **Voice Activity Detection (VAD)**: Silero-VAD or WebRTC VAD detects speech segments to avoid transcribing silent pauses or background music.
@@ -106,7 +106,7 @@ In `extracted_potplayer/Module/Whisper/Vulkan/`, PotPlayer includes a Vulkan-acc
 
 ## 5. Online Subtitle Search & Download Providers
 
-Located in `Extension/Subtitle/Search/`, PotPlayer connects to major subtitle repositories:
+Located in `Extension/Subtitle/Search/`, Jonaki connects to major subtitle repositories:
 
 1. **OpenSubtitles.org / OpenSubtitles.com**:
    - Calculates the **OpenSubtitles File Hash**:
@@ -120,7 +120,7 @@ Located in `Extension/Subtitle/Search/`, PotPlayer connects to major subtitle re
 
 ## 6. Subtitle Styling & Positioning Controls
 
-PotPlayer provides comprehensive visual customization for subtitle text:
+Jonaki provides comprehensive visual customization for subtitle text:
 
 - **Typography**: Font family selector, font size (8pt to 72pt), bold, italic, underline.
 - **Coloring**: Primary fill color, secondary karaoke fill color, outline color, drop-shadow color.

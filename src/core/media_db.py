@@ -21,13 +21,6 @@ class MediaDatabase:
             config_dir = os.path.expanduser("~/.config/jonaki")
             os.makedirs(config_dir, exist_ok=True)
             db_path = os.path.join(config_dir, "mediadb.sqlite")
-            # Migrate legacy potplayer db if present and new db doesn't exist
-            legacy_db = os.path.expanduser("~/.config/potplayer/mediadb.sqlite")
-            if not os.path.exists(db_path) and os.path.exists(legacy_db):
-                try:
-                    shutil.copy2(legacy_db, db_path)
-                except Exception:
-                    pass
         self.db_path = db_path
         try:
             self._init_database()
@@ -152,12 +145,19 @@ class MediaDatabase:
                 duration = max(coalesce(duration, 0.0), coalesce(?, 0.0)),
                 last_position = case when ? > 0.0 then ? else last_position end,
                 last_played_at = ?,
-                completed = ?,
+                completed = case when ? > 0.0 then ? else completed end,
                 audio_track = ?,
                 subtitle_track = ?,
                 volume = ?
             """, (file_path, title, duration, position, now, completed, audio_track, subtitle_track, volume,
-                  title, duration, position, position, now, completed, audio_track, subtitle_track, volume))
+                  title, duration, position, position, now, position, completed, audio_track, subtitle_track, volume))
+            conn.commit()
+
+    def reset_playback_position(self, file_path: str) -> None:
+        """Explicitly resets playback progress and completion state for a file."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE playback_history SET last_position = 0.0, completed = 0 WHERE file_path = ?", (file_path,))
             conn.commit()
 
     def get_playback_position(self, file_path: str) -> Optional[float]:

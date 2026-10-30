@@ -2,12 +2,13 @@
 [Desktop Entry]
 Name=Jonaki
 GenericName=Multimedia Player
-Comment=High-performance media player for Linux, inspired by PotPlayer
+Comment=High-performance media player for Linux
 Exec=jonaki %U
-Icon=/home/ashik/Data/Projects/PotPlayer/assets/logos/jonaki.png
+Icon=jonaki
 Terminal=false
 Type=Application
+StartupWMClass=jonaki
 Categories=AudioVideo;Player;Recorder;
 MimeType=video/mp4;video/x-matroska;video/avi;video/webm;video/quicktime;audio/mpeg;audio/flac;audio/ogg;
-Keywords=video;audio;player;subtitles;jonaki;potplayer;
+Keywords=video;audio;player;subtitles;jonaki;
 StartupNotify=true

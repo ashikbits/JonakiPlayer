@@ -2,7 +2,7 @@
 
 **Document Version:** 2.0.0 (Hardened & Verified)  
 **Author:** Senior Linux Multimedia Software QA Engineer  
-**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/PotPlayer`)  
+**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/Jonaki`)  
 **Commit Baseline:** `9743287` (Hardened branch `main`)  
 **Host Environment:** Debian GNU/Linux 13 (Trixie), Kernel 6.12.113+deb13-amd64, x86_64  
 **Display Server:** Wayland / X11 (`DISPLAY=:1`, `WAYLAND_DISPLAY=wayland-0`)  
@@ -15,7 +15,7 @@
 
 This report certifies the completion of the **Audio Enhancement Verification and Hardening Audit** for Jonaki Player.
 
-Following the initial PotPlayer-style audio enhancement implementation, an exhaustive correctness, safety, and regression audit was executed. The audit identified and resolved 3 High-Priority (P1) defects and 3 Medium-Priority (P2) defects, covering limiter auto-leveling suppression (`level=false`), preset "Off" state recovery, live playback transitions, and physical inter-sample peak boundaries.
+Following the initial Jonaki-style audio enhancement implementation, an exhaustive correctness, safety, and regression audit was executed. The audit identified and resolved 3 High-Priority (P1) defects and 3 Medium-Priority (P2) defects, covering limiter auto-leveling suppression (`level=false`), preset "Off" state recovery, live playback transitions, and physical inter-sample peak boundaries.
 
 The test suite was expanded to **293 test cases** across 15 test modules. The complete test suite was executed from a clean state and achieved a **100% pass rate** with zero errors, zero failures, and zero skipped tests.
 
@@ -27,9 +27,9 @@ The test suite was expanded to **293 test cases** across 15 test modules. The co
 - **Skipped / Blocked:** **0 (0.00%)**
 - **Process Exit Status:** **0 (Clean exit)**
 - **Total Execution Duration:** **31.21 seconds**
-- **Machine-Readable JUnit XML:** [`qa_reports/junit_report.xml`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/junit_report.xml)
-- **Hardening Audit Findings:** [`qa_reports/AUDIO_HARDENING_FINDINGS.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/AUDIO_HARDENING_FINDINGS.md)
-- **Detailed Measurements & Listening Audit:** [`qa_reports/AUDIO_TEST_RESULTS.md`](file:///home/ashik/Data/Projects/PotPlayer/qa_reports/AUDIO_TEST_RESULTS.md)
+- **Machine-Readable JUnit XML:** [`qa_reports/junit_report.xml`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/junit_report.xml)
+- **Hardening Audit Findings:** [`qa_reports/AUDIO_HARDENING_FINDINGS.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/AUDIO_HARDENING_FINDINGS.md)
+- **Detailed Measurements & Listening Audit:** [`qa_reports/AUDIO_TEST_RESULTS.md`](file:///home/ashik/Data/Projects/Jonaki/qa_reports/AUDIO_TEST_RESULTS.md)
 - **Regression Verdict:** **CLEAN PASS (ZERO DEFECTS REMAINING)**
 
 ---
@@ -49,7 +49,7 @@ The test suite was expanded to **293 test cases** across 15 test modules. The co
 | `tests/test_ipc.py` | Single-Instance IPC Lock & Concurrency | 6 | 6 | 0 | **PASS** |
 | `tests/test_media_db.py` | SQLite Persistence Schema, WAL Mode & Recovery | 7 | 7 | 0 | **PASS** |
 | `tests/test_playlist_view.py` | Playlist Management, Filtering, Shuffling & Reordering | 6 | 6 | 0 | **PASS** |
-| `tests/test_skin_engine.py` | PotPlayer DSF Vector Blitter & Button Layout | 7 | 7 | 0 | **PASS** |
+| `tests/test_skin_engine.py` | Jonaki DSF Vector Blitter & Button Layout | 7 | 7 | 0 | **PASS** |
 | `tests/test_subtitle_and_mpris.py` | Subtitle Parsing & MPRIS2 D-Bus Service | 6 | 6 | 0 | **PASS** |
 | `tests/test_audit_fixes.py` | Core Architecture Regression Fixes | 4 | 4 | 0 | **PASS** |
 | `tests/test_ui_audit_fixes.py` | UI Interaction Regression Fixes | 4 | 4 | 0 | **PASS** |
@@ -98,7 +98,7 @@ The test suite was expanded to **293 test cases** across 15 test modules. The co
 
 ### Final Verdict: **RECOMMENDED FOR PRODUCTION RELEASE**
 
-The PotPlayer-Style Audio Enhancement Subsystem for Jonaki Player has been rigorously audited, hardened, and verified:
+The Jonaki-Style Audio Enhancement Subsystem for Jonaki Player has been rigorously audited, hardened, and verified:
 1. **Zero Unexplained Failures:** 293 / 293 automated tests passing in 31.21s.
 2. **Defects Remediated:** All identified P1 and P2 defects have been resolved with minimal, surgical code changes.
 3. **Engineering Integrity:** Unsupported claims regarding true peaks have been corrected with measured, reproducible data distinguishing discrete sample peaks from reconstructed true peaks.

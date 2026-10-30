@@ -1,12 +1,12 @@
 # Pixel Shaders & Motion Interpolation Specification
 
-This document details the video post-processing pixel shader pipeline and VapourSynth/AviSynth motion interpolation engine, reverse-engineered from `extracted_potplayer/PxShader/`, `VapourSynth/`, and `AviSynth/`.
+This document details the video post-processing pixel shader pipeline and VapourSynth/AviSynth motion interpolation engine, reverse-engineered from `extracted_jonaki/PxShader/`, `VapourSynth/`, and `AviSynth/`.
 
 ---
 
 ## 1. Pixel Shaders Pipeline (HLSL to GLSL Conversion)
 
-Windows PotPlayer utilizes DirectX 9 Pixel Shader 2.0/3.0 HLSL scripts located in `PxShader/`. In the Linux implementation, these shaders are mapped into **GLSL Hook Shaders** compatible with `libplacebo` and modern OpenGL/Vulkan pipelines.
+Windows Jonaki utilizes DirectX 9 Pixel Shader 2.0/3.0 HLSL scripts located in `PxShader/`. In the Linux implementation, these shaders are mapped into **GLSL Hook Shaders** compatible with `libplacebo` and modern OpenGL/Vulkan pipelines.
 
 ```mermaid
 flowchart LR
@@ -19,7 +19,7 @@ flowchart LR
 
 ### 1.1 Shader Catalog & Conversion Reference
 
-The table below catalogs the 34 shaders extracted from PotPlayer and their GLSL implementation details:
+The table below catalogs the 34 shaders extracted from Jonaki and their GLSL implementation details:
 
 | Shader Name | File in `PxShader/` | Algorithmic Purpose | GLSL Mapping |
 | :--- | :--- | :--- | :--- |
@@ -41,7 +41,7 @@ The table below catalogs the 34 shaders extracted from PotPlayer and their GLSL 
 
 ## 2. HLSL to GLSL Conversion Example: `Sharpen.txt`
 
-### 2.1 Original HLSL (`extracted_potplayer/PxShader/Sharpen.txt`)
+### 2.1 Original HLSL (`extracted_jonaki/PxShader/Sharpen.txt`)
 ```hlsl
 sampler s0 : register(s0); 
 float4 p0 : register(c0); 
@@ -68,11 +68,11 @@ float4 main(float2 tex : TEXCOORD0) : COLOR
 }
 ```
 
-### 2.2 Converted Linux GLSL Hook (`potplayer_sharpen.hook`)
+### 2.2 Converted Linux GLSL Hook (`jonaki_sharpen.hook`)
 ```glsl
 //!HOOK MAIN
 //!BIND HOOKED
-//!DESC PotPlayer 3x3 Sharpen Shader
+//!DESC Jonaki 3x3 Sharpen Shader
 
 vec4 hook() {
     vec2 pt = HOOKED_pt;
@@ -99,7 +99,7 @@ vec4 hook() {
 
 ## 3. Motion Interpolation (VapourSynth & MVTools)
 
-PotPlayer features high-frame-rate motion interpolation (converting 24fps cinema content to 60fps or 144fps displays) using VapourSynth scripts located in `VapourSynth/motioninterpolation.vpy`.
+Jonaki features high-frame-rate motion interpolation (converting 24fps cinema content to 60fps or 144fps displays) using VapourSynth scripts located in `VapourSynth/motioninterpolation.vpy`.
 
 ### 3.1 Script Architecture (`motioninterpolation.vpy`)
 ```python

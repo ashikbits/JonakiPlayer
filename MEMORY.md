@@ -1,4 +1,4 @@
-# Jonaki for Linux (formerly PotPlayer for Linux) — Project Memory & Implementation Ledger
+# Jonaki for Linux (formerly Jonaki for Linux) — Project Memory & Implementation Ledger
 
 **Last Updated:** 2026-10-26 01:12:00 (UTC+6)  
 **Target Platform:** Linux (Debian 13 Trixie / Ubuntu 24.04+ / Fedora 40+ / Arch)  
@@ -19,7 +19,7 @@
 
 ### 1.3 Resolution: Unified Single-Window Playback & Native GPU Embedding
 * **User Feedback & Problem**:
-  * User observed two windows upon launch: one PotPlayer window and another detached mpv window titled `... - mpv`.
+  * User observed two windows upon launch: one Jonaki window and another detached mpv window titled `... - mpv`.
   * User instruction: *"fix plaback window, no other feature to be touched"*
 * **Root Cause Diagnosed**:
   1. **Dual Display Protocol Backend Decoupling**:
@@ -31,31 +31,31 @@
      * In X11, child `GdkWindow` subwindows can occlude or conflict with underlying OpenGL/EGL surfaces rendered by `libmpv`.
 * **Fix Implemented**:
   1. **Unset `WAYLAND_DISPLAY` & Force `gpu-context=x11egl`**:
-     * Stripped `WAYLAND_DISPLAY` in [`bin/potplayer`](bin/potplayer), [`src/potplayer.py`](src/potplayer.py), and [`src/core/engine.py`](src/core/engine.py).
+     * Stripped `WAYLAND_DISPLAY` in [`bin/jonaki`](bin/jonaki), [`src/jonaki.py`](src/jonaki.py), and [`src/core/engine.py`](src/core/engine.py).
      * Configured `gpu-context=x11egl` explicitly before `mpv_initialize()` and during `set_wid()`.
      * This guarantees `libmpv` talks strictly to the X11/XWayland display server where GTK's `wid` resides.
   2. **Direct GPU OSD Pipeline**:
      * Configured native top-left hardware OSD styling (`osd-font`, `osd-font-size=22`, `osd-align-x=left`, `osd-align-y=top`, margins).
      * Routed `self.osd.show_osd(...)` directly to `mpv`'s native hardware `show-text` engine during active playback.
-     * Kept `self.osd_layer` hidden during video playback (showing only when idle for the PotPlayer logo or when Tab Tech HUD / translated subtitles are invoked), ensuring zero subwindow clipping or flickering over the video area.
+     * Kept `self.osd_layer` hidden during video playback (showing only when idle for the Jonaki logo or when Tab Tech HUD / translated subtitles are invoked), ensuring zero subwindow clipping or flickering over the video area.
 * **Verification**:
   * Tested with 8K Baahubali WebM file (`Dhivara [8K]...webm`).
-  * Verified with `xwininfo -root -tree` that exactly ONE toplevel window exists, with mpv rendering directly into the child surface `0x1e00002 ("gl" "mpv")` inside PotPlayer.
-  * Screen capture confirmed 100% smooth, crystal-clear 8K video playback embedded inside the PotPlayer skin with zero detached windows and exactly one taskbar icon.
+  * Verified with `xwininfo -root -tree` that exactly ONE toplevel window exists, with mpv rendering directly into the child surface `0x1e00002 ("gl" "mpv")` inside Jonaki.
+  * Screen capture confirmed 100% smooth, crystal-clear 8K video playback embedded inside the Jonaki skin with zero detached windows and exactly one taskbar icon.
   * All 44 unit tests pass in 0.48s.
 * **Root Causes Diagnosed**:
   * In GStreamer `gtkglsink`, 4K/8K frames were forced through GTK3's Cairo main event loop. GTK's event loop bottlenecks high-frequency GPU buffer swaps, causing stutter and frame drops.
 * **Corrections Implemented**:
   1. **Zero External Dependency Packing**:
      * Extracted and packed `libmpv.so.2.5.0`, `libmpv.so.2`, and `libmpv.so` directly into the project repository under [`lib/`](lib/).
-     * Updated [`bin/potplayer`](bin/potplayer) launcher to export `LD_LIBRARY_PATH="$PROJECT_DIR/lib:$LD_LIBRARY_PATH"`.
+     * Updated [`bin/jonaki`](bin/jonaki) launcher to export `LD_LIBRARY_PATH="$PROJECT_DIR/lib:$LD_LIBRARY_PATH"`.
   2. **In-Process C-FFI Architecture**:
      * Built a high-performance in-process controller in [`src/core/engine.py`](src/core/engine.py) using Python `ctypes` directly linking to `lib/libmpv.so`.
      * Zero subprocesses, zero Unix IPC sockets, zero detached windows.
      * Overcame glibc locale conflict: GTK initialization resets `setlocale(LC_ALL, "")`, causing `mpv_create()` to abort if decimal separator is not `.` (dot). Ensured `libc.setlocale(1, b"C")` is enforced immediately after GTK initialization.
   3. **Performance Verified**:
      * 8K AV1 video (`Dhivara [8K]...webm`) verified playing at native 60fps with zero lag, instant seek response, and perfect A/V sync.
-  4. **PotPlayer Feature Set Parity**:
+  4. **Jonaki Feature Set Parity**:
      * **Audio Track Selection**: Dynamic Context Menu populated with all container/stream audio tracks with language labels, channel count, and active checks.
      * **Subtitle Track Selection & Dual Subtitles**: Full support for Primary and Secondary subtitles (`secondary-sid`), `Shift+S` cycling, and right-click menu track assignment.
      * **Media Information Dialog (`Ctrl+F1`)**: Comprehensive container, stream, bitrate, color space, and decoder inspector with instant "Copy to Clipboard" export.
@@ -75,7 +75,7 @@
 | Subsystem | Module | Status | Notes |
 | :--- | :--- | :--- | :--- |
 | **Core Playback Engine** | [`src/core/engine.py`](src/core/engine.py) | **Implemented (10/10)** | In-process `libmpv` packed in `lib/`; 8K 60fps AV1/HEVC/Opus zero-lag hardware playback. |
-| **CLI & Startup Switch Parser** | [`src/potplayer.py`](src/potplayer.py) | **Implemented** | Parity with `CmdLine64.txt`; absolute POSIX paths classified before switches; `--help`/`-h` support. |
+| **CLI & Startup Switch Parser** | [`src/jonaki.py`](src/jonaki.py) | **Implemented** | Parity with `CmdLine64.txt`; absolute POSIX paths classified before switches; `--help`/`-h` support. |
 | **IPC & Single-Instance** | [`src/core/ipc.py`](src/core/ipc.py) | **Implemented** | Unix domain socket server/client; `_owns_socket` tracking prevents secondary socket unlinking. |
 | **Main Window & Overlay** | [`src/ui/main_window.py`](src/ui/main_window.py) | **Implemented** | `Gtk.Overlay` with native embedded X11/XWayland surface; Cairo OSD & HUD overlay; full shortcut coordination. |
 | **Media Info Dialog (Ctrl+F1)** | [`src/ui/media_info_dialog.py`](src/ui/media_info_dialog.py) | **Implemented** | Formatted playback specs, container metadata, bitrates, decoders, and clipboard export. |
@@ -92,9 +92,9 @@
 | **Subtitle Translation** | [`src/subtitle/translator.py`](src/subtitle/translator.py) | **Implemented (10/10)** | Real-time background worker thread; live subtitle caption translation rendered via Cairo overlay. |
 | **Online Subtitle Search** | [`src/subtitle/online_search.py`](src/subtitle/online_search.py) | **Implemented (10/10)** | OpenSubtitles 64-bit checksum hasher + search modal dialog ([`src/ui/subtitle_search_dialog.py`](src/ui/subtitle_search_dialog.py)) with auto-download and gzip decompression. |
 | **MPRIS2 D-Bus Integration** | [`src/core/mpris.py`](src/core/mpris.py) | **Implemented (10/10)** | Native GDBus implementation of `org.mpris.MediaPlayer2` and `Player`; binds desktop media keys & lockscreen widgets. |
-| **Installer & Desktop Integration** | [`install.sh`](install.sh) / [`uninstall.sh`](uninstall.sh) | **Implemented (10/10)** | User & system installation script; installs icons, desktop entry, and symlinks `potplayer` to `~/.local/bin/`. |
+| **Installer & Desktop Integration** | [`install.sh`](install.sh) / [`uninstall.sh`](uninstall.sh) | **Implemented (10/10)** | User & system installation script; installs icons, desktop entry, and symlinks `jonaki` to `~/.local/bin/`. |
 | **DSF XML Dynamic Parser** | [`src/ui/skin_engine.py`](src/ui/skin_engine.py) | **Pending** | Built-in high-precision sprite renderer active; arbitrary third-party XML skin layout parser is planned. |
-| **AngelScript Extension VM** | [`src/extensions/host_api.py`](src/extensions/host_api.py) | **Pending** | `PotPlayerHostAPI` facade defined; AngelScript VM / Python sandbox runtime pending. |
+| **AngelScript Extension VM** | [`src/extensions/host_api.py`](src/extensions/host_api.py) | **Pending** | `JonakiHostAPI` facade defined; AngelScript VM / Python sandbox runtime pending. |
 
 ---
 
@@ -136,7 +136,7 @@
    - Technical HUD overlay (`Tab`) showing live resolution, codecs, framerate, and decoder status.
    - Playlist window (`F8`/`F12`) and Control Box dialog (`F6`).
 7. **Persistence**:
-   - SQLite database (`~/.config/potplayer/mediadb.sqlite`) saving resume positions, history, and bookmarks (`P` to add bookmark).
+   - SQLite database (`~/.config/jonaki/mediadb.sqlite`) saving resume positions, history, and bookmarks (`P` to add bookmark).
    - Auto-resume from previous playback point on media open.
 
 ---
@@ -146,7 +146,7 @@
 1. **Third-Party Arbitrary DSF XML Dynamic Skin Parser**:
    - The current DSF renderer blits high-precision sprites from `Default.dsf` (`Main.png`, `Window.png`, `Control.png`). A general dynamic parser for arbitrary third-party XML skin files is planned for future extension.
 2. **AngelScript Extension VM**:
-   - `PotPlayerHostAPI` facade is implemented; sandboxed out-of-process AngelScript/Python plugin runtime planned.
+   - `JonakiHostAPI` facade is implemented; sandboxed out-of-process AngelScript/Python plugin runtime planned.
 
 ---
 
@@ -156,17 +156,17 @@
 # Run unit test suite (43 tests - 100% passing)
 python3 -m unittest discover -s tests
 
-# Install PotPlayer locally to ~/.local/bin and applications menu
+# Install Jonaki locally to ~/.local/bin and applications menu
 ./install.sh
 
 # Launch player directly
-potplayer
+jonaki
 
 # Launch with 8K media file
-potplayer "/home/ashik/Data/Media/Dhivara [8K] Full Video Song ｜ Baahubali (Telugu) ｜ Prabhas,Tamannaah ｜ M.M. Keeravaani｜SS Rajamouli [UdAHSDxmfDs].webm"
+jonaki "/home/ashik/Data/Media/Dhivara [8K] Full Video Song ｜ Baahubali (Telugu) ｜ Prabhas,Tamannaah ｜ M.M. Keeravaani｜SS Rajamouli [UdAHSDxmfDs].webm"
 
 # Test CLI switches
-potplayer --help
-potplayer /path/to/media.mkv /volume=80 /seek=00:01:00
+jonaki --help
+jonaki /path/to/media.mkv /volume=80 /seek=00:01:00
 ```
 

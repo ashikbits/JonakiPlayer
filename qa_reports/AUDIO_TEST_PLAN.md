@@ -2,7 +2,7 @@
 
 **Document Version:** 1.0.0  
 **Author:** Senior Audio Quality Assurance & Desktop Application Tester  
-**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/PotPlayer`)  
+**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/Jonaki`)  
 **Date:** 2026-10-27  
 
 ---
@@ -22,7 +22,7 @@ The testing protocol verifies that the enhanced audio engine:
 
 ## 2. Test Media Corpus Specification
 
-All test signals are deterministically generated via [`tests/generate_audio_corpus.py`](file:///home/ashik/Data/Projects/PotPlayer/tests/generate_audio_corpus.py) and stored under [`tests/audio_corpus/`](file:///home/ashik/Data/Projects/PotPlayer/tests/audio_corpus/). In addition, a real-world reference media file is tested from the local system.
+All test signals are deterministically generated via [`tests/generate_audio_corpus.py`](file:///home/ashik/Data/Projects/Jonaki/tests/generate_audio_corpus.py) and stored under [`tests/audio_corpus/`](file:///home/ashik/Data/Projects/Jonaki/tests/audio_corpus/). In addition, a real-world reference media file is tested from the local system.
 
 | Fixture Name | Format & Sample Rate | Duration | Baseline I (LUFS) | Baseline TP (dBTP) | Test Purpose & Audio Characteristics |
 | :--- | :--- | :---: | :---: | :---: | :--- |
@@ -81,7 +81,7 @@ To ensure audio quality is genuinely preserved and not merely optimized for arbi
 
 ## 5. Automated Test Suite Architecture
 
-The automated test suite in [`tests/test_audio_enhancement.py`](file:///home/ashik/Data/Projects/PotPlayer/tests/test_audio_enhancement.py) incorporates 16 test cases covering:
+The automated test suite in [`tests/test_audio_enhancement.py`](file:///home/ashik/Data/Projects/Jonaki/tests/test_audio_enhancement.py) incorporates 16 test cases covering:
 
 1. **Model & Filter Chain Generation:**
    - `test_default_constructor_bit_perfect`: Ensures `AudioDSPChain()` produces `""` filter string.

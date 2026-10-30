@@ -1,24 +1,24 @@
 # CLI, IPC & Desktop Integration Specification
 
-This document details the command-line interface, inter-process communication protocol, and Linux desktop integration standards for **PotPlayer for Linux**, reverse-engineered from `CmdLine64.txt` and Windows IPC patterns.
+This document details the command-line interface, inter-process communication protocol, and Linux desktop integration standards for **Jonaki for Linux**, reverse-engineered from `CmdLine64.txt` and Windows IPC patterns.
 
 ---
 
-## 1. Command-Line Interface (100% Parity with Windows PotPlayer)
+## 1. Command-Line Interface (100% Parity with Windows Jonaki)
 
-PotPlayer for Linux accepts both standard POSIX flags (`--flag`) and native PotPlayer Windows switches (`/switch` and `-switch`):
+Jonaki for Linux accepts both standard POSIX flags (`--flag`) and native Jonaki Windows switches (`/switch` and `-switch`):
 
 ```bash
-potplayer [content ...] [/switch ...]
+jonaki [content ...] [/switch ...]
 ```
 
 ### 1.1 Content Arguments
 
 | Syntax | Description | Example |
 | :--- | :--- | :--- |
-| `"file_or_url"` | Local file, directory, or remote URL. Wildcards (`*`, `?`) supported. | `potplayer /path/to/movie.mkv` |
-| `"url\Title"` | Remote URL with a custom display title separated by backslash. | `potplayer "https://stream.m3u8\Live News"` |
-| `-` | Stream media directly from standard input (pipe). | `yt-dlp -o - "URL" \| potplayer -` |
+| `"file_or_url"` | Local file, directory, or remote URL. Wildcards (`*`, `?`) supported. | `jonaki /path/to/movie.mkv` |
+| `"url\Title"` | Remote URL with a custom display title separated by backslash. | `jonaki "https://stream.m3u8\Live News"` |
+| `-` | Stream media directly from standard input (pipe). | `yt-dlp -o - "URL" \| jonaki -` |
 
 ### 1.2 Switch Reference Table
 
@@ -55,8 +55,8 @@ potplayer [content ...] [/switch ...]
 
 ## 2. Inter-Process Communication (IPC) Socket Protocol
 
-To manage single-instance enforcement and command delegation between processes, PotPlayer for Linux uses a Unix domain socket:
-$$\text{Socket Path} = \$XDG\_RUNTIME\_DIR/\text{potplayer\_ipc.sock}$$
+To manage single-instance enforcement and command delegation between processes, Jonaki for Linux uses a Unix domain socket:
+$$\text{Socket Path} = \$XDG\_RUNTIME\_DIR/\text{jonaki\_ipc.sock}$$
 
 ### 2.1 Protocol Format
 Messages are formatted as single-line JSON objects terminated with a newline (`\n`):
@@ -103,17 +103,17 @@ Messages are formatted as single-line JSON objects terminated with a newline (`\
 
 ## 3. MPRIS2 D-Bus Interface
 
-PotPlayer registers on the session D-Bus under the well-known name:
-`org.mpris.MediaPlayer2.potplayer`
+Jonaki registers on the session D-Bus under the well-known name:
+`org.mpris.MediaPlayer2.jonaki`
 
 ### 3.1 `org.mpris.MediaPlayer2`
 - `CanQuit`: `true`
 - `CanRaise`: `true`
 - `HasTrackList`: `false`
-- `Identity`: `"PotPlayer"`
+- `Identity`: `"Jonaki"`
 - `SupportedUriSchemes`: `["file", "http", "https", "ftp", "rtsp", "smb"]`
 - `SupportedMimeTypes`: `["video/*", "audio/*", "application/vnd.apple.mpegurl"]`
-- `Raise()`: Brings the PotPlayer window to the front.
+- `Raise()`: Brings the Jonaki window to the front.
 - `Quit()`: Gracefully exits the player.
 
 ### 3.2 `org.mpris.MediaPlayer2.Player`
@@ -145,20 +145,20 @@ PotPlayer registers on the session D-Bus under the well-known name:
 
 ## 4. Desktop Integration Assets
 
-### 4.1 Desktop Entry (`potplayer.desktop`)
+### 4.1 Desktop Entry (`jonaki.desktop`)
 ```ini
 [Desktop Entry]
-Name=PotPlayer
+Name=Jonaki
 GenericName=Media Player
 Comment=High-performance multimedia player with advanced subtitle and hardware acceleration features
-Exec=potplayer %U
-Icon=potplayer
+Exec=jonaki %U
+Icon=jonaki
 Terminal=false
 Type=Application
 Categories=AudioVideo;Player;Recorder;TV;
 MimeType=video/mp4;video/mkv;video/avi;video/webm;video/x-matroska;audio/mpeg;audio/flac;audio/ogg;
-Keywords=video;audio;player;subtitles;potplayer;streaming;
+Keywords=video;audio;player;subtitles;jonaki;streaming;
 ```
 
 ### 4.2 MIME Associations & App Icons
-- The PotPlayer icon atlas (`extracted_potplayer/Logos/PotPlayer.png`) is installed into `/usr/share/icons/hicolor/scalable/apps/potplayer.svg` and standard PNG resolution buckets (16x16 up to 512x512).
+- The Jonaki icon atlas (`extracted_jonaki/Logos/Jonaki.png`) is installed into `/usr/share/icons/hicolor/scalable/apps/jonaki.svg` and standard PNG resolution buckets (16x16 up to 512x512).

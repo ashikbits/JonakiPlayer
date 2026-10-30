@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """
 Torrent Stream Dialog for Jonaki Player.
-Provides a PotPlayer-inspired GTK3 interface for opening magnet URIs or .torrent files,
+Provides a clean GTK3 interface for opening magnet URIs or .torrent files,
 retrieving metadata asynchronously, selecting files, and streaming video.
 """
 
@@ -12,7 +12,7 @@ from typing import Optional, Callable, List, Any
 
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk, Gdk, GLib, Pango
 
 from torrent.models import TorrentFileInfo, TorrentStatusInfo
 from torrent.manager import TorrentStreamManager
@@ -102,7 +102,7 @@ class TorrentStreamDialog(Gtk.Dialog):
 
         self.status_label = Gtk.Label(label="Paste a magnet link or choose a .torrent file to begin.", xalign=0.0)
         self.status_label.set_hexpand(True)
-        self.status_label.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
+        self.status_label.set_ellipsize(Pango.EllipsizeMode.END)
         status_box.pack_start(self.status_label, True, True, 0)
 
         self.cancel_btn = Gtk.Button(label="Cancel")
@@ -399,7 +399,7 @@ class TorrentStreamDialog(Gtk.Dialog):
             if self.on_start_playback:
                 self.on_start_playback(stream_url, file_name)
 
-            self.response(Gtk.ResponseType.OK)
+            self.destroy()
         except Exception as e:
             self.status_label.set_text(f"Error starting stream: {e}")
 

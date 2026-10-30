@@ -27,7 +27,7 @@ from video.capture import MediaCaptureManager
 from video.shader_manager import VideoShaderManager
 from subtitle.online_search import SubtitleSearchClient, compute_opensubtitles_hash
 from subtitle.translator import SubtitleTranslator
-from extensions.host_api import PotPlayerHostAPI
+from extensions.host_api import JonakiHostAPI
 
 
 class TestMediaInfoDialog(unittest.TestCase):
@@ -167,6 +167,19 @@ class TestMediaCaptureManager(unittest.TestCase):
                 cmd = mock_run.call_args[0][0]
                 self.assertIn("image/jpeg", cmd)
 
+    def test_clipboard_copy_gtk_native(self):
+        """Verifies native GTK clipboard copying succeeds when pixbuf can be loaded."""
+        from gi.repository import GdkPixbuf
+        img_path = os.path.join(self.temp_dir, "valid.png")
+        pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 1, 1)
+        pixbuf.savev(img_path, "png", [], [])
+        self.assertTrue(os.path.exists(img_path))
+
+        with patch("subprocess.run") as mock_run:
+            res = self.mgr.copy_file_to_clipboard(img_path)
+            self.assertTrue(res)
+            self.assertFalse(mock_run.called)
+
 
 class TestShaderManagerSecurity(unittest.TestCase):
     def setUp(self):
@@ -276,7 +289,7 @@ class TestSubtitleTranslator(unittest.TestCase):
 class TestHostAPI(unittest.TestCase):
     def setUp(self):
         self.mock_win = MagicMock()
-        self.host_api = PotPlayerHostAPI(self.mock_win)
+        self.host_api = JonakiHostAPI(self.mock_win)
 
     def test_host_check_version_with_prerelease(self):
         """Verifies HostCheckVersion handles versions with pre-release suffixes."""
@@ -303,6 +316,149 @@ class TestHostAPI(unittest.TestCase):
             req = mock_urlopen.call_args[0][0]
             self.assertEqual(req.get_header("Authorization"), "Bearer test_token")
             self.assertEqual(req.get_header("X-custom"), "Value")
+
+    def test_host_api_blocks_unsupported_schemes(self):
+        """Verifies HostAPI blocks non-http/https URL schemes like file://."""
+        res_get = self.host_api.HostUrlGetString("file:///etc/passwd")
+        self.assertEqual(res_get, "")
+        res_post = self.host_api.HostUrlPostData("ftp://example.com", post_data="123")
+        self.assertEqual(res_post, "")
+
+    def test_host_api_temp_folder(self):
+        import tempfile
+        self.assertEqual(self.host_api.HostGetTempFolder(), tempfile.gettempdir())
+
+
+class TestNewAuditHardening(unittest.TestCase):
+    def test_dsp_chain_negative_gain(self):
+        """Negative total gain (attenuation) must generate volume filter."""
+        from audio.dsp_chain import AudioDSPChain
+        dsp = AudioDSPChain()
+        dsp.audio_boost_db = -6.0
+        chain = dsp.build_filter_chain()
+        self.assertIn("volume=-6.0dB", chain)
+
+    def test_translator_provider_cache_invalidation(self):
+        """Changing provider on SubtitleTranslator must clear cached translations."""
+        from subtitle.translator import SubtitleTranslator
+        tr = SubtitleTranslator(provider="google")
+        tr._cache[("Hello", "auto", "es")] = "Hola"
+        self.assertIn(("Hello", "auto", "es"), tr._cache)
+        tr.provider = "deepl"
+        self.assertNotIn(("Hello", "auto", "es"), tr._cache)
+
+    def test_subtitle_search_validation(self):
+        """Subtitle search must validate schemes and encode lang."""
+        from subtitle.online_search import SubtitleSearchClient
+        client = SubtitleSearchClient()
+        self.assertFalse(client.download_subtitle("file:///etc/passwd", "/tmp/out.srt"))
+        self.assertFalse(client.download_subtitle("", "/tmp/out.srt"))
+
+    def test_video_shader_manager_color_clamping(self):
+        """ShaderManager set_color clamps values between -100 and +100."""
+        from video.shader_manager import VideoShaderManager
+        mgr = VideoShaderManager()
+        self.assertEqual(mgr.set_color("brightness", 150), 100)
+        self.assertEqual(mgr.brightness, 100)
+        self.assertEqual(mgr.set_color("contrast", -200), -100)
+        self.assertEqual(mgr.contrast, -100)
+
+    def test_skin_engine_loads_jonaki_and_dsf_logos(self):
+        """Skin engine must load both native jonaki.png and DSF surfaces."""
+        from ui.skin_engine import PotSkinEngine
+        import cairo
+        skin = PotSkinEngine()
+        self.assertIn("jonaki.png", skin.surfaces)
+        self.assertIsInstance(skin.surfaces["jonaki.png"], cairo.ImageSurface)
+        self.assertGreater(skin.surfaces["jonaki.png"].get_width(), 0)
+        self.assertGreater(skin.surfaces["jonaki.png"].get_height(), 0)
+
+        self.assertIn("dsf_logo.png", skin.surfaces)
+        self.assertIsInstance(skin.surfaces["dsf_logo.png"], cairo.ImageSurface)
+
+    def test_main_window_sets_icon(self):
+        """JonakiMainWindow must configure application window icon."""
+        from ui.main_window import JonakiMainWindow
+        win = JonakiMainWindow()
+        try:
+            icons = win.get_icon_list()
+            default_icons = Gtk.Window.get_default_icon_list()
+            self.assertTrue(len(icons) > 0 or len(default_icons) > 0, "Window or default icon must be set")
+        finally:
+            win.destroy()
+
+    def test_idle_video_area_draw_modes(self):
+        """_on_draw_video_area must safely render idle logo across dimensions and fallbacks."""
+        import cairo
+        from unittest.mock import MagicMock
+        from ui.main_window import JonakiMainWindow
+        from core.engine import PlaybackState
+
+        win = JonakiMainWindow()
+        try:
+            win.core.state = PlaybackState.IDLE
+            win.core.current_file = None
+
+            # Test 1: Standard 960x580 with jonaki.png
+            img_surf = cairo.ImageSurface(cairo.FORMAT_RGB24, 960, 580)
+            cr = cairo.Context(img_surf)
+            widget = MagicMock()
+            widget.get_allocation.return_value = MagicMock(width=960, height=580)
+            win._on_draw_video_area(widget, cr)
+
+            # Test 2: Compact 100x80 allocation
+            widget.get_allocation.return_value = MagicMock(width=100, height=80)
+            win._on_draw_video_area(widget, cr)
+
+            # Test 3: DSF fallback
+            saved_jonaki = win.skin.surfaces.pop("jonaki.png", None)
+            try:
+                widget.get_allocation.return_value = MagicMock(width=800, height=600)
+                win._on_draw_video_area(widget, cr)
+            finally:
+                if saved_jonaki is not None:
+                    win.skin.surfaces["jonaki.png"] = saved_jonaki
+
+            # Test 4: Pure vector fallback (empty surfaces)
+            saved_surfaces = win.skin.surfaces
+            try:
+                win.skin.surfaces = {}
+                win._on_draw_video_area(widget, cr)
+            finally:
+                win.skin.surfaces = saved_surfaces
+        finally:
+            win.destroy()
+
+    def test_desktop_files_have_startup_wmclass(self):
+        """Desktop files must define StartupWMClass=jonaki for Wayland and X11 taskbars."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for df in ("jonaki.desktop",):
+            path = os.path.join(root, df)
+            with open(path, "r") as f:
+                content = f.read()
+            self.assertIn("StartupWMClass=jonaki", content, f"{df} missing StartupWMClass=jonaki")
+
+    def test_pulse_pipewire_environment_properties(self):
+        """Audio server environment hints must include application.desktop-entry and application.name."""
+        import jonaki
+        pulse_prop = os.environ.get("PULSE_PROP", "")
+        self.assertIn("application.name='Jonaki'", pulse_prop)
+        self.assertIn("application.desktop-entry='jonaki'", pulse_prop)
+        self.assertIn("application.process.binary='jonaki'", pulse_prop)
+        self.assertEqual(os.environ.get("PIPEWIRE_APP_NAME"), "Jonaki")
+
+    def test_main_window_multi_resolution_icons(self):
+        """JonakiMainWindow must populate a multi-resolution icon hierarchy for taskbars."""
+        from ui.main_window import JonakiMainWindow
+        win = JonakiMainWindow()
+        try:
+            icons = win.get_icon_list()
+            self.assertGreaterEqual(len(icons), 3, "Window icon list should contain multiple resolutions")
+            widths = [pb.get_width() for pb in icons]
+            self.assertIn(16, widths)
+            self.assertIn(48, widths)
+        finally:
+            win.destroy()
 
 
 if __name__ == "__main__":

@@ -51,7 +51,7 @@ class TestCLIParsingAndSwitches(unittest.TestCase):
 
     def test_TC_SYS_01_standard_switches(self):
         """
-        TC-SYS-01: Verify parsing of standard PotPlayer boolean and mode flags.
+        TC-SYS-01: Verify parsing of standard boolean and mode flags.
         Preconditions: CLI entrypoint parse_arguments is available.
         Steps: Pass all documented standard flags in argv.
         Expected: Corresponding options dictionary entries must be set to True.
@@ -1113,19 +1113,15 @@ class TestDesktopAndPackaging(unittest.TestCase):
 
     def test_TC_PKG_01_launchers_exist_and_executable(self):
         """
-        TC-PKG-01: Verify bin/jonaki and bin/potplayer exist and have executable bit set.
+        TC-PKG-01: Verify bin/jonaki exists and has executable bit set.
         Preconditions: Repository checkout.
-        Steps: Check os.access(path, os.X_OK) for bin/jonaki and bin/potplayer.
-        Expected: Both files exist and are executable.
+        Steps: Check os.access(path, os.X_OK) for bin/jonaki.
+        Expected: File exists and is executable.
         """
         jonaki_bin = os.path.join(self.root_dir, "bin", "jonaki")
-        potplayer_bin = os.path.join(self.root_dir, "bin", "potplayer")
 
         self.assertTrue(os.path.isfile(jonaki_bin), "bin/jonaki missing")
         self.assertTrue(os.access(jonaki_bin, os.X_OK), "bin/jonaki is not executable")
-
-        self.assertTrue(os.path.isfile(potplayer_bin), "bin/potplayer missing")
-        self.assertTrue(os.access(potplayer_bin, os.X_OK), "bin/potplayer is not executable")
 
     def test_TC_PKG_02_bin_jonaki_environment_exports(self):
         """
@@ -1145,12 +1141,12 @@ class TestDesktopAndPackaging(unittest.TestCase):
 
     def test_TC_PKG_03_desktop_entry_validation(self):
         """
-        TC-PKG-03: Validate jonaki.desktop and potplayer.desktop with desktop-file-validate.
+        TC-PKG-03: Validate jonaki.desktop with desktop-file-validate.
         Preconditions: desktop-file-validate installed on host.
-        Steps: Execute desktop-file-validate on both desktop files.
+        Steps: Execute desktop-file-validate on jonaki.desktop.
         Expected: Command returns exit code 0 without validation errors.
         """
-        for desktop_name in ("jonaki.desktop", "potplayer.desktop"):
+        for desktop_name in ("jonaki.desktop",):
             path = os.path.join(self.root_dir, desktop_name)
             self.assertTrue(os.path.isfile(path), f"{desktop_name} missing")
             res = subprocess.run(["desktop-file-validate", path], capture_output=True, text=True)

@@ -1,6 +1,6 @@
 //!HOOK MAIN
 //!BIND HOOKED
-//!DESC PotPlayer 3x3 Sharpen Shader
+//!DESC 3x3 Sharpen Shader
 
 vec4 hook() {
     vec2 pt = HOOKED_pt;

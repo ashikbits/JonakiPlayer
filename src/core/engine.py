@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """
 Jonaki for Linux - Core Playback Engine Controller (In-Process libmpv Backend)
-Integrates packed libmpv directly in-process via C-FFI, delivering authentic PotPlayer performance:
+Integrates packed libmpv directly in-process via C-FFI, delivering high-performance playback:
 - Zero dropped frames at 4K / 8K 60fps with zero-copy hardware acceleration (VA-API / NVDEC / Vulkan)
 - Pristine, synchronized subtitle rendering via libass (zero flickering or blinking)
 - Accurate hardware metadata extraction, 10-band equalizer, AVC normalizer, and ProcAmp color balance
@@ -118,6 +118,7 @@ class JonakiCore:
         self.on_time_update: Optional[Callable[[float, float], None]] = None
         self.on_state_change: Optional[Callable[[str], None]] = None
         self.on_file_end: Optional[Callable[[], None]] = None
+        self.on_audio_filter_sync: Optional[Callable[[], None]] = None
 
         # Find and load bundled libmpv
         self.lib = self._load_bundled_libmpv()
@@ -195,9 +196,13 @@ class JonakiCore:
         self.lib.mpv_set_option_string(self.handle, b"input-cursor", b"no")
         self.lib.mpv_set_option_string(self.handle, b"sub-auto", b"fuzzy")
         self.lib.mpv_set_option_string(self.handle, b"sub-font-size", str(self.sub_size).encode("utf-8"))
+        # Audio output routing: prefer pulse (pipewire-pulse) then pipewire then alsa
+        # This guarantees proper application naming, icon, and desktop entry propagation to system soundbars
+        self.lib.mpv_set_option_string(self.handle, b"ao", b"pulse,pipewire,alsa")
         self.lib.mpv_set_option_string(self.handle, b"audio-client-name", b"Jonaki")
+        self.lib.mpv_set_option_string(self.handle, b"title", b"Jonaki")
 
-        # Native hardware OSD styling (Jonaki / PotPlayer-style top-left notifications)
+        # Native hardware OSD styling (top-left notifications)
         self.lib.mpv_set_option_string(self.handle, b"osd-font", b"sans-serif")
         self.lib.mpv_set_option_string(self.handle, b"osd-font-size", b"22")
         self.lib.mpv_set_option_string(self.handle, b"osd-color", b"#FFFFFF")
@@ -527,6 +532,9 @@ class JonakiCore:
         self._apply_audio_filters()
 
     def _apply_audio_filters(self) -> None:
+        if getattr(self, "on_audio_filter_sync", None) and callable(self.on_audio_filter_sync):
+            self.on_audio_filter_sync()
+            return
         filters = []
         freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
         eq_parts = []
@@ -805,7 +813,7 @@ class JonakiCore:
 
     def get_media_detailed_info(self) -> Dict[str, Any]:
         """
-        Collects comprehensive technical playback details matching PotPlayer's Ctrl+F1 dialog.
+        Collects comprehensive technical playback details matching the Ctrl+F1 dialog.
         """
         w = int(self.get_property_float("width", 0)) or self.video_width
         h = int(self.get_property_float("height", 0)) or self.video_height
@@ -869,7 +877,3 @@ class JonakiCore:
     def take_screenshot(self, output_path: str) -> bool:
         ret = self.command_args("screenshot-to-file", output_path, "video")
         return ret == 0
-
-
-# Backward compatibility alias
-PotPlayerCore = JonakiCore

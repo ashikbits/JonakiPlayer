@@ -122,7 +122,7 @@ A comprehensive systems, security, and reliability audit of Jonaki Player was pe
 
 | Test ID | Test Name | Preconditions | Steps | Expected Result | Actual Result | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
-| **TC-SYS-01** | Standard Switches Parsing | `parse_arguments` available | Pass all standard PotPlayer flags (`/filedlg`, `/autoplay`, `/add`, `/sort`, `/cam`, `/dvd`, `/cd:2`, `/title`, `/config`) | All flags parsed and mapped to dictionary keys | Options dictionary correctly populated with all flags | **PASS** |
+| **TC-SYS-01** | Standard Switches Parsing | `parse_arguments` available | Pass all standard Jonaki flags (`/filedlg`, `/autoplay`, `/add`, `/sort`, `/cam`, `/dvd`, `/cd:2`, `/title`, `/config`) | All flags parsed and mapped to dictionary keys | Options dictionary correctly populated with all flags | **PASS** |
 | **TC-SYS-02** | Value Switches & Validation | `parse_seek_time` available | Test seek formats (`01:30:15.5`, `12:34`, `120`, negative, invalid) and volume clamping (`-25`, `75.5`, `180`, `loud`) | Valid timestamps converted to seconds, volume clamped to `[0, 100]`, invalid values return None/0.0 | Seek converted accurately, volume clamped without exception | **PASS** |
 | **TC-SYS-03** | Single-Instance Switch Handling | CLI parser | Pass `/new`, `/current`, and both simultaneously | `/new` sets new instance; `/new` takes precedence over `/current` | Flags parsed accurately | **PASS** |
 | **TC-SYS-04** | Stdin Streaming Switch | CLI parser | Pass `-` argument | `stdin_stream` set to True, `fd://0` appended to contents | Stdin flag recognized, `fd://0` queued | **PASS** |
@@ -212,9 +212,9 @@ A comprehensive systems, security, and reliability audit of Jonaki Player was pe
 
 | Test ID | Test Name | Preconditions | Steps | Expected Result | Actual Result | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
-| **TC-PKG-01** | Launcher Executables Existence | Repository checkout | Check existence and executable bit on `bin/jonaki`, `bin/potplayer` | Both exist and have executable bit (`chmod +x`) | Both exist and are executable | **PASS** |
+| **TC-PKG-01** | Launcher Executables Existence | Repository checkout | Check existence and executable bit on `bin/jonaki`, `bin/jonaki` | Both exist and have executable bit (`chmod +x`) | Both exist and are executable | **PASS** |
 | **TC-PKG-02** | Launcher Environment Configuration | `bin/jonaki` | Verify `GDK_BACKEND=x11`, `unset WAYLAND_DISPLAY`, paths | Script sets X11 backend and unsets Wayland display | Environment variables properly configured | **PASS** |
-| **TC-PKG-03** | Desktop Entry Validation | `desktop-file-validate` | Validate `jonaki.desktop` and `potplayer.desktop` | Exit code 0 without syntax errors | Validated successfully (exit code 0) | **PASS** |
+| **TC-PKG-03** | Desktop Entry Validation | `desktop-file-validate` | Validate `jonaki.desktop` and `jonaki.desktop` | Exit code 0 without syntax errors | Validated successfully (exit code 0) | **PASS** |
 | **TC-PKG-04** | Application Icon Asset | Repository checkout | Verify `assets/logos/jonaki.png` format and size | Valid PNG header `\x89PNG` | Valid 256x256 PNG icon | **PASS** |
 | **TC-PKG-05** | Script Bash Syntax Safety | bash interpreter | Run `bash -n install.sh` and `bash -n uninstall.sh` | Exit code 0, no syntax errors | Both scripts pass syntax checks | **PASS** |
 
@@ -224,7 +224,7 @@ A comprehensive systems, security, and reliability audit of Jonaki Player was pe
 
 ```mermaid
 flowchart TD
-    CLI["CLI / Desktop Launcher<br/>(bin/jonaki, potplayer)"] -->|"GDK_BACKEND=x11<br/>unset WAYLAND_DISPLAY"| Main["Main Application<br/>(src/jonaki.py)"]
+    CLI["CLI / Desktop Launcher<br/>(bin/jonaki, jonaki)"] -->|"GDK_BACKEND=x11<br/>unset WAYLAND_DISPLAY"| Main["Main Application<br/>(src/jonaki.py)"]
     Main -->|"Advisory flock"| IPC["Single-Instance IPC<br/>(src/core/ipc.py)"]
     Main -->|"Direct C-FFI"| MPV["In-Process libmpv Core<br/>(libmpv.so.2)"]
     Main -->|"WAL Mode PRAGMA"| SQLite[("Media Database<br/>~/.config/jonaki/mediadb.sqlite")]
@@ -240,7 +240,7 @@ flowchart TD
    - Secondary instances cleanly forward playback requests without creating duplicate UI windows.
 3. **Desktop & Linux Packaging:**
    - `bin/jonaki` correctly configures the runtime environment (`GDK_BACKEND=x11`, `unset WAYLAND_DISPLAY`, `PYTHONPATH`, `LD_LIBRARY_PATH`).
-   - Both `jonaki.desktop` and `potplayer.desktop` conform to XDG specifications and pass `desktop-file-validate`.
+   - Both `jonaki.desktop` and `jonaki.desktop` conform to XDG specifications and pass `desktop-file-validate`.
    - `install.sh` and `uninstall.sh` handle user-local installation into `~/.local/` cleanly with an optional `--purge` flag for user settings.
 
 ---

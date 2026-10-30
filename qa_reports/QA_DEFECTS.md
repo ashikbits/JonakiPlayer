@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-27  
 **Auditor:** Senior Software QA Engineer & Linux Desktop Application Tester  
-**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/PotPlayer`)  
+**Repository:** `ashik60/JonakiPlayer` (`/home/ashik/Data/Projects/Jonaki`)  
 **Commit:** `9743287`  
 **Test Environment:** Debian GNU/Linux 13 (Trixie), Kernel 6.12.113+deb13-amd64, x86_64, DISPLAY=:1  
 

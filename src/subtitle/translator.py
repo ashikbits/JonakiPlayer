@@ -14,7 +14,7 @@ class SubtitleTranslator:
     def __init__(self, provider: str = "google", target_lang: str = "en", api_key: str = "",
                  local_endpoint: str = "http://localhost:11434/api/generate", local_model: str = "qwen2.5",
                  max_cache_size: int = 1000):
-        self.provider = provider
+        self._provider = provider
         self.target_lang = target_lang
         self.api_key = api_key
         self.local_endpoint = local_endpoint
@@ -24,6 +24,21 @@ class SubtitleTranslator:
         self._cache: OrderedDict[Tuple[str, str, str], str] = OrderedDict()
         import threading
         self._lock = threading.Lock()
+
+    @property
+    def provider(self) -> str:
+        return self._provider
+
+    @provider.setter
+    def provider(self, val: str) -> None:
+        if self._provider != val:
+            self._provider = val
+            if hasattr(self, "_cache"):
+                self.clear_cache()
+
+    def clear_cache(self) -> None:
+        with getattr(self, "_lock", None) or threading.Lock():
+            self._cache.clear()
 
     def translate(self, text: str, src_lang: str = "auto", dst_lang: Optional[str] = None) -> str:
         if not text or not text.strip():
@@ -117,13 +132,44 @@ class SubtitleTranslator:
             return data.get("translatedText", text)
 
     def _translate_local_llm(self, text: str, src: str, dst: str) -> str:
+        parsed = urllib.parse.urlsplit(self.local_endpoint)
+        if parsed.scheme.lower() not in ("http", "https"):
+            raise ValueError(f"Invalid local endpoint URL scheme: {parsed.scheme}")
         prompt = f"Translate this subtitle accurately into {dst}. Output ONLY the translated text:\n{text}"
-        payload = json.dumps({
-            "model": self.local_model,
-            "prompt": prompt,
-            "stream": False
-        }).encode("utf-8")
-        req = urllib.request.Request(self.local_endpoint, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        is_openai_compat = "/v1/" in self.local_endpoint or "chat/completions" in self.local_endpoint
+
+        if is_openai_compat:
+            payload_dict = {
+                "model": self.local_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": f"You are a subtitle translator. Translate the text accurately into {dst}. Output ONLY the translated text."
+                    },
+                    {"role": "user", "content": text}
+                ],
+                "temperature": 0.3
+            }
+        else:
+            payload_dict = {
+                "model": self.local_model,
+                "prompt": prompt,
+                "stream": False
+            }
+
+        payload = json.dumps(payload_dict).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        req = urllib.request.Request(self.local_endpoint, data=payload, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=15.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return data.get("response", text).strip()
+            if "choices" in data and len(data["choices"]) > 0:
+                choice = data["choices"][0]
+                if "message" in choice and "content" in choice["message"]:
+                    return choice["message"]["content"].strip()
+                elif "text" in choice:
+                    return choice["text"].strip()
+            resp_val = data.get("response", text)
+            return str(resp_val).strip() if resp_val is not None else text
