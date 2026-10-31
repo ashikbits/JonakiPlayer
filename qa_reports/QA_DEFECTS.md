@@ -164,8 +164,8 @@
 - **Actual Behavior:** Engine transitions to `PlaybackState.PLAYING` and emits 10Hz `on_time_update(0.0, 0.0)` events despite no media loaded.
 - **Reproduction Frequency:** 100% (deterministic).
 - **Root Cause:** Missing guard `if not self.current_file: return` in `play()` and `play_pause()`.
-- **Recommended Fix:** Add guard `if not self.current_file: return`.
-- **Regression Test:** `tests/test_playback_integration.py:TC-PLY-08`.
+- **Recommended Fix:** Add guard `if not self.current_file: return` in `play()`, `pause()`, and `play_pause()`.
+- **Regression Test:** `tests/test_engine.py:TestJonakiCore.test_playback_controls_and_callbacks` & `tests/test_playback_integration.py:TC-PLY-14`.
 
 ---
 
