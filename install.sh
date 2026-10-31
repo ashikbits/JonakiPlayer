@@ -38,7 +38,8 @@ mkdir -p "$HOME/.local/share/icons/hicolor/256x256/apps"
 # 2. Make launcher executable and link to ~/.local/bin/
 chmod +x "$SCRIPT_DIR/bin/jonaki"
 ln -sf "$SCRIPT_DIR/bin/jonaki" "$HOME/.local/bin/jonaki"
-echo "[+] Linked launcher to $HOME/.local/bin/jonaki"
+ln -sf "$SCRIPT_DIR/bin/jonaki" "$HOME/.local/bin/potplayer"
+echo "[+] Linked launcher to $HOME/.local/bin/jonaki and $HOME/.local/bin/potplayer"
 
 # 3. Install App Icon in multi-resolution hierarchy (16x16 to 512x512)
 python3 -c "

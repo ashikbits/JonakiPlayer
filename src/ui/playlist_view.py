@@ -7,7 +7,7 @@ import os
 import random
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 from typing import Any, List, Dict
 
 
@@ -37,6 +37,12 @@ class PlaylistWindow(Gtk.Window):
         self.tree_view = Gtk.TreeView(model=self.list_store)
         self.tree_view.set_headers_visible(True)
         self.tree_view.connect("row-activated", self._on_row_activated)
+
+        # Drag and Drop support for URI lists
+        self.tree_view.drag_dest_set(Gtk.DestDefaults.ALL, [], Gdk.DragAction.COPY)
+        self.tree_view.drag_dest_add_uri_targets()
+        self.tree_view.connect("drag-data-received", self._on_drag_data_received)
+        self.tree_view.connect("button-press-event", self._on_tree_button_press)
 
         # Columns
         col_idx = Gtk.TreeViewColumn("#", Gtk.CellRendererText(), text=0)
@@ -71,6 +77,10 @@ class PlaylistWindow(Gtk.Window):
         btn_remove.connect("clicked", self._on_remove_clicked)
         bottom_box.pack_end(btn_remove, False, False, 0)
 
+        btn_clear = Gtk.Button(label="Clear")
+        btn_clear.connect("clicked", self._on_clear_clicked)
+        bottom_box.pack_end(btn_clear, False, False, 0)
+
         btn_sort = Gtk.Button(label="Sort")
         btn_sort.connect("clicked", self._on_sort_clicked)
         bottom_box.pack_end(btn_sort, False, False, 0)
@@ -88,22 +98,97 @@ class PlaylistWindow(Gtk.Window):
         if event.keyval == Gdk.KEY_Escape:
             self.hide()
             return True
+        elif event.keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace, Gdk.KEY_KP_Delete):
+            self._on_remove_clicked(None)
+            return True
         return False
 
+    def _on_drag_data_received(self, widget, drag_context, x, y, data, info, time):
+        uris = data.get_uris()
+        if uris:
+            files = []
+            for u in uris:
+                p = GLib.filename_from_uri(u)[0] if u.startswith("file://") else u
+                if p:
+                    files.append(p)
+            if files:
+                self.player.add_files_to_playlist(files, auto_play=False, clear_existing=False)
+                drag_context.finish(True, False, time)
+                return
+        drag_context.finish(False, False, time)
+
+    def _on_tree_button_press(self, tree_view, event):
+        if event.button == 3:
+            path_info = tree_view.get_path_at_pos(int(event.x), int(event.y))
+            if path_info:
+                path, col, _, _ = path_info
+                tree_view.get_selection().select_path(path)
+            menu = Gtk.Menu()
+            item_play = Gtk.MenuItem(label="Play")
+            def _play_selected(w):
+                model, rows = tree_view.get_selection().get_selected_rows()
+                if rows:
+                    self._on_row_activated(tree_view, rows[0], None)
+            item_play.connect("activate", _play_selected)
+            menu.append(item_play)
+
+            item_remove = Gtk.MenuItem(label="Remove")
+            item_remove.connect("activate", self._on_remove_clicked)
+            menu.append(item_remove)
+
+            menu.append(Gtk.SeparatorMenuItem())
+
+            item_clear = Gtk.MenuItem(label="Clear Playlist")
+            item_clear.connect("activate", self._on_clear_clicked)
+            menu.append(item_clear)
+
+            menu.show_all()
+            menu.popup(None, None, None, None, event.button, event.time)
+            return True
+        return False
+
+    def _on_clear_clicked(self, widget):
+        if hasattr(self.player, "handle_command"):
+            self.player.handle_command("CMD_CLEAR_PLAYLIST")
+        else:
+            if hasattr(self.player, "playlist") and isinstance(self.player.playlist, list):
+                self.player.playlist.clear()
+            if hasattr(self.player, "current_index"):
+                self.player.current_index = -1
+            if hasattr(self.player, "core") and hasattr(self.player.core, "stop"):
+                self.player.core.stop()
+            self.update_playlist([])
+
     def update_playlist(self, items: List[Dict[str, Any]]) -> None:
+        query = self.search_entry.get_text().strip()
+        if query:
+            self._on_search_changed(self.search_entry)
+            return
+
         self.list_store.clear()
         total_sec = 0.0
         cur_idx = getattr(self.player, "current_index", -1)
+        active_iter = None
         for i, item in enumerate(items):
             item_path = item.get("path") or ""
             raw_title = item.get("title") or (os.path.basename(item_path) if item_path else "Unknown")
-            title = f"▶ {raw_title}" if i == cur_idx else raw_title
+            is_active = (isinstance(cur_idx, int) and i == cur_idx)
+            title = f"▶ {raw_title}" if is_active else raw_title
             dur = item.get("duration", 0.0)
             total_sec += dur
             dur_str = self._format_duration(dur)
-            self.list_store.append([i + 1, title, dur_str, item_path])
+            row_iter = self.list_store.append([i + 1, title, dur_str, item_path])
+            if is_active:
+                active_iter = row_iter
 
         self.lbl_summary.set_text(f"{len(items)} items | {self._format_duration(total_sec)}")
+        if active_iter is not None:
+            path = self.list_store.get_path(active_iter)
+            self.tree_view.get_selection().select_iter(active_iter)
+            try:
+                self.tree_view.scroll_to_cell(path, None, True, 0.5, 0.0)
+            except Exception:
+                pass
 
     def _format_duration(self, sec: float) -> str:
         s = int(max(0.0, sec))
@@ -153,6 +238,7 @@ class PlaylistWindow(Gtk.Window):
         # Quick filter implementation preserving original playlist indices
         query = entry.get_text().lower().strip()
         filtered = []
+        cur_idx = getattr(self.player, "current_index", -1)
         for orig_idx, item in enumerate(self.player.playlist):
             title = (item.get("title") or "").lower()
             path = (item.get("path") or "").lower()
@@ -161,11 +247,23 @@ class PlaylistWindow(Gtk.Window):
 
         self.list_store.clear()
         total_sec = 0.0
+        active_iter = None
         for orig_idx, item in filtered:
             item_path = item.get("path") or ""
-            title = item.get("title") or (os.path.basename(item_path) if item_path else "Unknown")
+            raw_title = item.get("title") or (os.path.basename(item_path) if item_path else "Unknown")
+            is_active = (isinstance(cur_idx, int) and orig_idx == cur_idx)
+            title = f"▶ {raw_title}" if is_active else raw_title
             dur = item.get("duration", 0.0)
             total_sec += dur
             dur_str = self._format_duration(dur)
-            self.list_store.append([orig_idx + 1, title, dur_str, item_path])
+            row_iter = self.list_store.append([orig_idx + 1, title, dur_str, item_path])
+            if is_active:
+                active_iter = row_iter
         self.lbl_summary.set_text(f"{len(filtered)} items | {self._format_duration(total_sec)}")
+        if active_iter is not None:
+            path = self.list_store.get_path(active_iter)
+            self.tree_view.get_selection().select_iter(active_iter)
+            try:
+                self.tree_view.scroll_to_cell(path, None, True, 0.5, 0.0)
+            except Exception:
+                pass

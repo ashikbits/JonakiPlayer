@@ -1,0 +1,20 @@
+//!HOOK MAIN
+//!BIND HOOKED
+//!DESC 3x3 Denoise Shader
+
+vec4 hook() {
+    vec2 pt = HOOKED_pt;
+    vec4 c = HOOKED_tex(HOOKED_pos);
+
+    vec4 cTL = HOOKED_tex(HOOKED_pos + vec2(-pt.x, -pt.y)) * 1.0;
+    vec4 cTC = HOOKED_tex(HOOKED_pos + vec2(  0.0, -pt.y)) * 2.0;
+    vec4 cTR = HOOKED_tex(HOOKED_pos + vec2( pt.x, -pt.y)) * 1.0;
+    vec4 cML = HOOKED_tex(HOOKED_pos + vec2(-pt.x,   0.0)) * 2.0;
+    vec4 cMC = c * 4.0;
+    vec4 cMR = HOOKED_tex(HOOKED_pos + vec2( pt.x,   0.0)) * 2.0;
+    vec4 cBL = HOOKED_tex(HOOKED_pos + vec2(-pt.x,  pt.y)) * 1.0;
+    vec4 cBC = HOOKED_tex(HOOKED_pos + vec2(  0.0,  pt.y)) * 2.0;
+    vec4 cBR = HOOKED_tex(HOOKED_pos + vec2( pt.x,  pt.y)) * 1.0;
+
+    return (cTL + cTC + cTR + cML + cMC + cMR + cBL + cBC + cBR) / 16.0;
+}

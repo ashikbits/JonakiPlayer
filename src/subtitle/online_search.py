@@ -25,22 +25,20 @@ def compute_opensubtitles_hash(file_path: str) -> Optional[str]:
         hash_val = file_size
 
         with open(file_path, "rb") as f:
-            # First 64KB (8192 64-bit integers)
-            for _ in range(8192):
-                chunk = f.read(8)
-                if len(chunk) < 8:
-                    chunk = chunk.ljust(8, b"\0")
-                (val,) = struct.unpack("<Q", chunk)
-                hash_val = (hash_val + val) & 0xFFFFFFFFFFFFFFFF
+            # First 64KB (8192 64-bit integers) read in a single optimized buffer
+            first_block = f.read(65536)
+            if len(first_block) < 65536:
+                first_block = first_block.ljust(65536, b"\0")
+            vals_first = struct.unpack("<8192Q", first_block)
+            hash_val = (hash_val + sum(vals_first)) & 0xFFFFFFFFFFFFFFFF
 
-            # Last 64KB
+            # Last 64KB read in a single optimized buffer
             f.seek(max(0, file_size - 65536), os.SEEK_SET)
-            for _ in range(8192):
-                chunk = f.read(8)
-                if len(chunk) < 8:
-                    chunk = chunk.ljust(8, b"\0")
-                (val,) = struct.unpack("<Q", chunk)
-                hash_val = (hash_val + val) & 0xFFFFFFFFFFFFFFFF
+            last_block = f.read(65536)
+            if len(last_block) < 65536:
+                last_block = last_block.ljust(65536, b"\0")
+            vals_last = struct.unpack("<8192Q", last_block)
+            hash_val = (hash_val + sum(vals_last)) & 0xFFFFFFFFFFFFFFFF
 
         return f"{hash_val:016x}"
     except Exception as e:

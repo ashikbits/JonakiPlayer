@@ -63,6 +63,13 @@ class ControlBoxDialog(Gtk.Window):
             # Audio tab
             if hasattr(self, "eq_check") and hasattr(self.player, "equalizer"):
                 self.eq_check.set_active(self.player.equalizer.enabled)
+            if hasattr(self, "preset_combo") and hasattr(self.player, "equalizer"):
+                cur_preset = getattr(self.player.equalizer, "current_preset", None)
+                if cur_preset:
+                    for idx, name in enumerate(EQUALIZER_PRESETS.keys()):
+                        if name == cur_preset:
+                            self.preset_combo.set_active(idx)
+                            break
             if hasattr(self, "eq_scales") and hasattr(self.player, "equalizer"):
                 for i, scale in enumerate(self.eq_scales):
                     scale.set_value(self.player.equalizer.get_band(i))
@@ -246,6 +253,7 @@ class ControlBoxDialog(Gtk.Window):
         if name and self.player.equalizer.apply_preset(name):
             self._updating_controls = True
             try:
+                self.eq_check.set_active(True)
                 for i, scale in enumerate(self.eq_scales):
                     scale.set_value(self.player.equalizer.get_band(i))
             finally:
@@ -357,6 +365,16 @@ class ControlBoxDialog(Gtk.Window):
             lambda s: None if self._updating_controls else self.player.core.set_speed(s.get_value())
         )
 
+        speed_btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        btn_reset_speed = Gtk.Button(label="Reset Speed (1.0x)")
+        def _reset_speed(w):
+            if not self._updating_controls:
+                self.speed_scale.set_value(1.0)
+                self.player.core.set_speed(1.0)
+        btn_reset_speed.connect("clicked", _reset_speed)
+        speed_btn_box.pack_start(btn_reset_speed, False, False, 0)
+        vbox.pack_start(speed_btn_box, False, False, 0)
+
         # A-B Repeat Box
         ab_frame = Gtk.Frame(label="A-B Repeat Loop")
         ab_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -365,11 +383,14 @@ class ControlBoxDialog(Gtk.Window):
         ab_box.set_margin_top(8)
         ab_box.set_margin_bottom(8)
 
-        btn_a = Gtk.Button(label="Set A ([)")
+        btn_a = Gtk.Button(label="Set A (Ctrl+[)")
+        btn_a.set_tooltip_text("Set loop start point A ([ or Ctrl+[)")
         btn_a.connect("clicked", lambda w: self.player.set_repeat_a())
-        btn_b = Gtk.Button(label="Set B (])")
+        btn_b = Gtk.Button(label="Set B (Ctrl+])")
+        btn_b.set_tooltip_text("Set loop end point B (] or Ctrl+])")
         btn_b.connect("clicked", lambda w: self.player.set_repeat_b())
-        btn_clear = Gtk.Button(label="Clear (\\)")
+        btn_clear = Gtk.Button(label="Clear (Ctrl+\\)")
+        btn_clear.set_tooltip_text("Clear A-B repeat loop (\\ or Ctrl+\\)")
         btn_clear.connect("clicked", lambda w: self.player.core.clear_repeat())
 
         ab_box.pack_start(btn_a, True, True, 0)

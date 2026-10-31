@@ -119,8 +119,9 @@ class OSDOverlay:
         cr.set_font_size(11.0)
 
         file_str = str(info.get('file_path') or 'No file loaded')
-        if len(file_str) > 55:
-            file_str = "..." + file_str[-52:]
+        max_chars = max(20, int((card_w - 140) / 7.2))
+        if len(file_str) > max_chars:
+            file_str = "..." + file_str[-(max_chars - 3):]
 
         fps_val = float(info.get('fps') or 0.0)
         hwdec_val = info.get("hwdec")

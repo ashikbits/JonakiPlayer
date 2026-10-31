@@ -388,6 +388,10 @@ class JonakiCore:
             else:
                 self.video_aspect = f"{w}:{h}"
 
+        media_title = self.get_property("media-title")
+        if media_title:
+            self.current_title = media_title
+
     # --- Playback Operations ---
 
     def load_file(self, path_or_url: str, start_pts: float = 0.0, sub_file: Optional[str] = None,
@@ -421,13 +425,18 @@ class JonakiCore:
                     sub_file = candidate
                     break
 
+        # Reset any active zoom or stretch distortion from previous playback
+        self.reset_video_dimensions()
+
         opts = []
         if start_pts > 0:
             opts.append(f"start={start_pts}")
         if sub_file:
-            opts.append(f"sub-file={sub_file}")
+            safe_sub = sub_file.replace('"', '\\"')
+            opts.append(f'sub-file="{safe_sub}"' if (',' in safe_sub or ' ' in safe_sub) else f"sub-file={safe_sub}")
         if audio_file:
-            opts.append(f"audio-file={audio_file}")
+            safe_aud = audio_file.replace('"', '\\"')
+            opts.append(f'audio-file="{safe_aud}"' if (',' in safe_aud or ' ' in safe_aud) else f"audio-file={safe_aud}")
 
         if opts:
             self.command_args("loadfile", resolved, "replace", "-1", ",".join(opts))
@@ -440,6 +449,8 @@ class JonakiCore:
             self.on_state_change(self.state)
 
     def play(self) -> None:
+        if not self.current_file:
+            return
         if self.get_property("eof-reached") == "yes" or (self.duration > 0 and self.position >= self.duration - 0.2):
             self.seek_absolute(0.0)
         self.set_property("pause", "no")
@@ -448,12 +459,16 @@ class JonakiCore:
             self.on_state_change(self.state)
 
     def pause(self) -> None:
+        if not self.current_file:
+            return
         self.set_property("pause", "yes")
         self.state = PlaybackState.PAUSED
         if self.on_state_change:
             self.on_state_change(self.state)
 
     def play_pause(self) -> None:
+        if not self.current_file:
+            return
         if self.state == PlaybackState.PLAYING:
             self.pause()
         else:
@@ -470,6 +485,7 @@ class JonakiCore:
         self.video_height = 0
         self.video_fps = 0.0
         self._metadata_probed = False
+        self.reset_video_dimensions()
         if self.on_state_change:
             self.on_state_change(self.state)
 

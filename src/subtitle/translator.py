@@ -4,6 +4,7 @@ Integrates Google Translate, DeepL, LibreTranslate, and Local LLMs (Ollama / LM 
 """
 
 import json
+import threading
 import urllib.parse
 import urllib.request
 from collections import OrderedDict

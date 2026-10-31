@@ -271,7 +271,7 @@ class PotSkinEngine:
             cr.paint()
             cr.restore()
 
-    def layout(self, panel_width: int, panel_height: int = 62, is_playing: bool = False) -> None:
+    def layout(self, panel_width: int, panel_height: int = 62, is_playing: bool = False, min_badge_x: int = 330) -> None:
         """
         Computes coordinate bounds for all widgets across the panel dimensions.
         Total height is partitioned into 22px upper strip (timebar & volume) and
@@ -319,7 +319,7 @@ class PotSkinEngine:
         max_badge_x = rx - 10
 
         # --- 4. Lower Strip: Badges ---
-        badge_x = 320
+        badge_x = max(330, min_badge_x)
         badge_h = 14
         badge_y = lower_y + (lower_h - badge_h) // 2
         for badge in self.badges:
@@ -340,7 +340,6 @@ class PotSkinEngine:
         """
         Renders the complete control bar surface using authentic DSF sprites.
         """
-        self.layout(panel_width, panel_height, is_playing=is_playing)
         main_surf = self.surfaces.get("Main.png")
         if not main_surf:
             return
@@ -352,6 +351,23 @@ class PotSkinEngine:
         if duration_sec is None or math.isnan(duration_sec) or math.isinf(duration_sec):
             duration_sec = 0.0
         duration_sec = max(0.0, duration_sec)
+
+        # Dynamic time formatting with duration-aware hour symmetrization
+        curr_str = self._format_time(position_sec, duration_sec)
+        total_str = self._format_time(duration_sec, duration_sec)
+        time_x = 215
+
+        cr.save()
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.set_font_size(11.0)
+        curr_ext = cr.text_extents(curr_str)
+        slash_ext = cr.text_extents("/")
+        tot_ext = cr.text_extents(total_str)
+        cr.restore()
+
+        time_w = curr_ext.x_advance + 4 + slash_ext.x_advance + 4 + tot_ext.x_advance
+        needed_badge_x = max(330, int(time_x + time_w + 14))
+        self.layout(panel_width, panel_height, is_playing=is_playing, min_badge_x=needed_badge_x)
 
         upper_h = 22
         lower_y = upper_h
@@ -495,9 +511,6 @@ class PotSkinEngine:
             cr.restore()
 
         # 5. Lower Strip: Time Labels (Sans 11pt)
-        curr_str = self._format_time(position_sec)
-        total_str = self._format_time(duration_sec)
-        time_x = 215
         time_base_y = lower_y + (lower_h // 2) + 4
 
         cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
@@ -507,14 +520,12 @@ class PotSkinEngine:
         cr.set_source_rgb(0.86, 0.86, 0.88)
         cr.move_to(time_x, time_base_y)
         cr.show_text(curr_str)
-        curr_ext = cr.text_extents(curr_str)
 
         # Slash separator
         slash_x = time_x + curr_ext.x_advance + 4
         cr.set_source_rgb(0.50, 0.50, 0.54)
         cr.move_to(slash_x, time_base_y)
         cr.show_text("/")
-        slash_ext = cr.text_extents("/")
 
         # Total time
         tot_x = slash_x + slash_ext.x_advance + 4
@@ -587,14 +598,15 @@ class PotSkinEngine:
             cr.paint()
             cr.restore()
 
-    def _format_time(self, seconds: Optional[float]) -> str:
+    def _format_time(self, seconds: Optional[float], total_duration: Optional[float] = None) -> str:
         if seconds is None or math.isnan(seconds) or math.isinf(seconds):
             seconds = 0.0
         s = int(max(0.0, seconds))
         hrs = s // 3600
         mins = (s % 3600) // 60
         secs = s % 60
-        if hrs > 0:
+        force_hours = (total_duration is not None and not math.isnan(total_duration) and not math.isinf(total_duration) and total_duration >= 3600)
+        if hrs > 0 or force_hours:
             return f"{hrs:02d}:{mins:02d}:{secs:02d}"
         return f"{mins:02d}:{secs:02d}"
 

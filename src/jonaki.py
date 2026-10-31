@@ -31,7 +31,17 @@ def ensure_x11_backend() -> None:
 
 
 if not os.environ.get("VDPAU_DRIVER"):
-    if os.path.exists("/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_radeonsi.so"):
+    has_amd = False
+    try:
+        import glob
+        for vpath in glob.glob("/sys/class/drm/card*/device/vendor"):
+            with open(vpath, "r") as vf:
+                if "0x1002" in vf.read().lower():
+                    has_amd = True
+                    break
+    except Exception:
+        pass
+    if has_amd and os.path.exists("/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_radeonsi.so"):
         os.environ["VDPAU_DRIVER"] = "radeonsi"
     elif os.path.exists("/usr/lib/x86_64-linux-gnu/vdpau/libvdpau_va_gl.so"):
         os.environ["VDPAU_DRIVER"] = "va_gl"
@@ -126,6 +136,8 @@ def parse_arguments(argv: list) -> dict:
         "new": False,
         "current": False,
         "clipboard": False,
+        "play": False,
+        "pause": False,
         "seek": 0.0,
         "sub": None,
         "aud": None,
@@ -217,6 +229,10 @@ def parse_arguments(argv: list) -> dict:
                 options["current"] = True
             elif sw == "clipboard":
                 options["clipboard"] = True
+            elif sw == "play":
+                options["play"] = True
+            elif sw == "pause":
+                options["pause"] = True
             elif sw.startswith("seek="):
                 options["seek"] = parse_seek_time(clean.split("=", 1)[1])
             elif sw.startswith("sub="):
@@ -270,8 +286,6 @@ def parse_arguments(argv: list) -> dict:
 
 def main():
     ensure_x11_backend()
-    GLib.set_prgname("jonaki")
-    GLib.set_application_name("Jonaki")
     Gtk.init_check(None)
 
     # Set multi-resolution default window icon early so all dialogs and windows inherit it
@@ -313,6 +327,13 @@ def main():
                 "volume": options["volume"],
                 "title": options["title"],
                 "config": options["config"],
+                "filedlg": options.get("filedlg", False),
+                "folderdlg": options.get("folderdlg", False),
+                "urldlg": options.get("urldlg", False),
+                "torrentdlg": options.get("torrentdlg", False),
+                "clipboard": options.get("clipboard", False),
+                "play": options.get("play", False),
+                "pause": options.get("pause", False),
             }
             res = client.send_command(payload)
             if res and res.get("status") == "ok":
@@ -360,6 +381,11 @@ def main():
             if title_val:
                 GLib.idle_add(win.set_title, f"Jonaki - {title_val}")
 
+            if msg.get("play"):
+                GLib.idle_add(win.core.play)
+            elif msg.get("pause"):
+                GLib.idle_add(win.core.pause)
+
             if items:
                 # If add_mode is True, don't interrupt current playback (auto_play=False, clear_existing=False)
                 GLib.idle_add(win.add_files_to_playlist, items, not add_mode, not add_mode, seek_val, sub_val, aud_val)
@@ -370,6 +396,19 @@ def main():
                     GLib.idle_add(win.core.load_audio_track, aud_val)
                 if seek_val > 0:
                     GLib.idle_add(win.core.seek_absolute, seek_val)
+
+            if msg.get("filedlg"):
+                GLib.idle_add(win.handle_command, "CMD_OPEN_FILE")
+            elif msg.get("folderdlg"):
+                GLib.idle_add(win.handle_command, "CMD_OPEN_FOLDER")
+            elif msg.get("urldlg"):
+                GLib.idle_add(win.handle_command, "CMD_OPEN_URL")
+            elif msg.get("torrentdlg"):
+                GLib.idle_add(win.handle_command, "CMD_OPEN_TORRENT")
+            elif msg.get("clipboard"):
+                GLib.idle_add(win.handle_command, "CMD_OPEN_CLIPBOARD")
+
+            GLib.idle_add(win.present)
             return {"status": "ok"}
         return {"status": "unrecognized_command"}
 

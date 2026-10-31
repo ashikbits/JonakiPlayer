@@ -6,7 +6,8 @@ REAL_SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$REAL_SOURCE")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-export PYTHONPATH="$PROJECT_DIR/src:$HOME/.local/lib/python3.13/site-packages:$PYTHONPATH"
+PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "3")"
+export PYTHONPATH="$PROJECT_DIR/src:$HOME/.local/lib/python${PY_VER}/site-packages:$PYTHONPATH"
 export LD_LIBRARY_PATH="$PROJECT_DIR/lib:$LD_LIBRARY_PATH"
 export GST_PLUGIN_PATH="$PROJECT_DIR/lib/gstreamer-1.0:$HOME/.local/lib/gstreamer-1.0:$GST_PLUGIN_PATH"
 export GDK_BACKEND=x11

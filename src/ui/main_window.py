@@ -67,10 +67,10 @@ class JonakiMainWindow(Gtk.Window):
                         pass
 
         # Set WM_CLASS and WM_WINDOW_ROLE explicitly for X11 / XWayland window managers
-        try:
-            self.set_wmclass("jonaki", "Jonaki")
-        except Exception:
-            pass
+        if not GLib.get_prgname():
+            GLib.set_prgname("jonaki")
+        if not GLib.get_application_name():
+            GLib.set_application_name("Jonaki")
         try:
             self.set_role("jonaki")
         except Exception:
@@ -184,11 +184,13 @@ class JonakiMainWindow(Gtk.Window):
         self.skin_area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK |
                                  Gdk.EventMask.BUTTON_RELEASE_MASK |
                                  Gdk.EventMask.POINTER_MOTION_MASK |
-                                 Gdk.EventMask.ENTER_NOTIFY_MASK)
+                                 Gdk.EventMask.ENTER_NOTIFY_MASK |
+                                 Gdk.EventMask.SCROLL_MASK)
         self.skin_area.connect("button-press-event", self._on_skin_button_press)
         self.skin_area.connect("button-release-event", self._on_skin_button_release)
         self.skin_area.connect("motion-notify-event", self._on_skin_motion)
         self.skin_area.connect("enter-notify-event", self._on_mouse_motion)
+        self.skin_area.connect("scroll-event", self._on_skin_scroll)
         self.main_box.pack_end(self.skin_area, False, False, 0)
 
         # Right-click context menu
@@ -202,10 +204,12 @@ class JonakiMainWindow(Gtk.Window):
         # Window events (also listen on toplevel so any mouse activity unhides cursor and handles right click)
         self.add_events(Gdk.EventMask.POINTER_MOTION_MASK |
                         Gdk.EventMask.ENTER_NOTIFY_MASK |
-                        Gdk.EventMask.BUTTON_PRESS_MASK)
+                        Gdk.EventMask.BUTTON_PRESS_MASK |
+                        Gdk.EventMask.BUTTON_RELEASE_MASK)
         self.connect("motion-notify-event", self._on_mouse_motion)
         self.connect("enter-notify-event", self._on_mouse_motion)
         self.connect("button-press-event", self._on_window_button_press)
+        self.connect("button-release-event", self._on_window_button_release)
         self.connect("window-state-event", self._on_window_state_event)
         self.connect("key-press-event", self._on_key_press)
         self.connect("destroy", self._on_destroy)
@@ -224,6 +228,23 @@ class JonakiMainWindow(Gtk.Window):
 
         if initial_files:
             self.add_files_to_playlist(initial_files, auto_play=True)
+        else:
+            # Restore saved playlist from MediaDatabase if available
+            try:
+                saved_items = self.db.get_playlist_items()
+                if saved_items:
+                    for row in saved_items:
+                        fp = row.get("file_path", "")
+                        if fp and (os.path.exists(fp) or any(fp.startswith(p) for p in ("http://", "https://", "rtsp://", "rtmp://", "ytdl://"))):
+                            self.playlist.append({
+                                "path": fp,
+                                "title": row.get("title") or os.path.basename(fp),
+                                "duration": row.get("duration", 0.0)
+                            })
+                    if self.playlist:
+                        self.playlist_window.update_playlist(self.playlist)
+            except Exception as e:
+                print(f"[MediaDB] Failed to restore playlist: {e}")
 
     def _on_video_realize(self, widget):
         # Obtain native X11 Window ID to attach in-process mpv
@@ -504,6 +525,9 @@ class JonakiMainWindow(Gtk.Window):
                 cr.restore()
 
         # Draw OSD notifications and Tab Technical Info HUD
+        pix_fmt = self.core.get_property("video-format") or self.core.get_property("pixelformat") or "YUV420P"
+        sr = self.core.get_property("audio-params/samplerate") or 48000
+        drop_frames = self.core.get_property("drop-frame-count") or 0
         info = {
             "file_path": self.core.current_file or "None",
             "video_codec": self.core.video_codec or "Auto",
@@ -512,7 +536,11 @@ class JonakiMainWindow(Gtk.Window):
             "width": self.core.video_width if self.core.video_width > 0 else 1920,
             "height": self.core.video_height if self.core.video_height > 0 else 1080,
             "aspect": self.core.video_aspect or "16:9",
-            "fps": self.core.video_fps if self.core.video_fps > 0 else 60.0
+            "fps": self.core.video_fps if self.core.video_fps > 0 else 60.0,
+            "pixel_format": str(pix_fmt).upper(),
+            "sample_rate": sr,
+            "dropped_frames": drop_frames,
+            "audio_channels": self.core.audio_channels or 2
         }
         is_active = bool(self.core.state in (PlaybackState.PLAYING, PlaybackState.PAUSED) and self.core.current_file)
         self.osd.render(cr, w, h, info, self.core.position, self.core.duration, skip_transient_osd=is_active)
@@ -595,14 +623,14 @@ class JonakiMainWindow(Gtk.Window):
                     self._click_timer_id = None
                 def _do_click():
                     self._click_timer_id = None
-                    self.core.play_pause()
+                    self.toggle_play_pause()
                     return False
                 self._click_timer_id = GLib.timeout_add(250, _do_click)
         elif event.button == 3:
             if self._click_timer_id:
                 GLib.source_remove(self._click_timer_id)
                 self._click_timer_id = None
-            self.context_menu.popup(event, self.core)
+            self.context_menu.popup(event, self.core, recent_files=self.db.get_recent_history(15))
         return True
 
     def _on_window_button_press(self, widget, event):
@@ -610,8 +638,14 @@ class JonakiMainWindow(Gtk.Window):
             if self._click_timer_id:
                 GLib.source_remove(self._click_timer_id)
                 self._click_timer_id = None
-            self.context_menu.popup(event, self.core)
+            self.context_menu.popup(event, self.core, recent_files=self.db.get_recent_history(15))
             return True
+        return False
+
+    def _on_window_button_release(self, widget, event):
+        # Global window button-release handler: resets skin seek and volume dragging safely
+        if getattr(self.skin.timebar, "is_dragging", False) or getattr(self.skin.volume_slider, "is_dragging", False):
+            self._on_skin_button_release(widget, event)
         return False
 
     def _on_video_scroll(self, widget, event):
@@ -630,13 +664,40 @@ class JonakiMainWindow(Gtk.Window):
                 self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
         return True
 
+    def _on_skin_scroll(self, widget, event):
+        x = int(getattr(event, "x", 0))
+        y = int(getattr(event, "y", 0))
+        # If scroll is over the timebar, perform relative seeking (+5s / -5s)
+        if self.skin.timebar:
+            tx, ty, tw, th = self.skin.timebar.rect
+            if tx <= x <= tx + tw and ty - 3 <= y <= ty + th + 4:
+                direction = event.direction
+                if direction == Gdk.ScrollDirection.UP:
+                    self.core.seek_relative(+5.0)
+                    self.osd.show_osd("Seek: +5 sec")
+                    return True
+                elif direction == Gdk.ScrollDirection.DOWN:
+                    self.core.seek_relative(-5.0)
+                    self.osd.show_osd("Seek: -5 sec")
+                    return True
+                elif direction == Gdk.ScrollDirection.SMOOTH:
+                    _, dy = event.get_scroll_deltas()
+                    if abs(dy) > 0.01:
+                        delta = -5.0 if dy > 0 else 5.0
+                        self.core.seek_relative(delta)
+                        self.osd.show_osd(f"Seek: {'+5' if delta > 0 else '-5'} sec")
+                        return True
+
+        # Otherwise route through volume scroll
+        return self._on_video_scroll(widget, event)
+
     def _on_skin_button_press(self, widget, event):
         self._on_mouse_motion(widget, event)
         if event.button == 3:
             if self._click_timer_id:
                 GLib.source_remove(self._click_timer_id)
                 self._click_timer_id = None
-            self.context_menu.popup(event, self.core)
+            self.context_menu.popup(event, self.core, recent_files=self.db.get_recent_history(15))
             return True
         is_playing = (self.core.state == PlaybackState.PLAYING)
         hit = self.skin.hit_test(int(event.x), int(event.y), is_playing=is_playing)
@@ -646,6 +707,7 @@ class JonakiMainWindow(Gtk.Window):
                 self.skin.timebar.state = 2  # Down
                 tx, ty, tw, th = self.skin.timebar.rect
                 ratio = max(0.0, min(1.0, (event.x - tx) / tw))
+                self.skin.timebar.drag_ratio = ratio
                 self.core.seek_percent(ratio * 100.0)
             elif hit == self.skin.volume_slider:
                 self.skin.volume_slider.is_dragging = True
@@ -662,6 +724,7 @@ class JonakiMainWindow(Gtk.Window):
     def _on_skin_button_release(self, widget, event):
         if self.skin.timebar:
             self.skin.timebar.is_dragging = False
+            self.skin.timebar.drag_ratio = None
             self.skin.timebar.state = 0
         if self.skin.volume_slider:
             self.skin.volume_slider.is_dragging = False
@@ -676,6 +739,7 @@ class JonakiMainWindow(Gtk.Window):
         if self.skin.timebar and self.skin.timebar.is_dragging:
             tx, ty, tw, th = self.skin.timebar.rect
             ratio = max(0.0, min(1.0, (x - tx) / tw))
+            self.skin.timebar.drag_ratio = ratio
             self.core.seek_percent(ratio * 100.0)
         elif self.skin.volume_slider and self.skin.volume_slider.is_dragging:
             vx, vy, vw, vh = self.skin.volume_slider.rect
@@ -683,14 +747,22 @@ class JonakiMainWindow(Gtk.Window):
             self.skin.volume_slider.value = ratio
             self.core.set_volume(ratio * 100.0)
         else:
+            hovered_tooltip = None
             if self.skin.timebar:
                 tx, ty, tw, th = self.skin.timebar.rect
-                self.skin.timebar.state = 1 if (tx <= x <= tx + tw and ty - 3 <= y <= ty + th + 4) else 0
+                is_tb_hover = (tx <= x <= tx + tw and ty - 3 <= y <= ty + th + 4)
+                self.skin.timebar.state = 1 if is_tb_hover else 0
+                if is_tb_hover and getattr(self.core, "duration", 0) > 0:
+                    hover_ratio = max(0.0, min(1.0, (x - tx) / tw))
+                    hover_sec = hover_ratio * self.core.duration
+                    hovered_tooltip = f"Seek: {self.skin._format_time(hover_sec, self.core.duration)}"
             if self.skin.volume_slider:
                 vx, vy, vw, vh = self.skin.volume_slider.rect
-                self.skin.volume_slider.state = 1 if (vx <= x <= vx + vw and vy - 3 <= y <= vy + vh + 4) else 0
+                is_vol_hover = (vx <= x <= vx + vw and vy - 3 <= y <= vy + vh + 4)
+                self.skin.volume_slider.state = 1 if is_vol_hover else 0
+                if is_vol_hover:
+                    hovered_tooltip = f"Volume: {int(self.core.volume)}%"
             is_playing = (self.core.state == PlaybackState.PLAYING)
-            hovered_tooltip = None
             for btn in self.skin.buttons + self.skin.badges:
                 if btn == self.skin.btn_play and is_playing:
                     btn.state = 0
@@ -1054,25 +1126,25 @@ class JonakiMainWindow(Gtk.Window):
         if alt and keyval in (Gdk.KEY_1, Gdk.KEY_KP_1):
             w = int(self.core.video_width * 0.5) if self.core.video_width > 0 else 640
             h = int(self.core.video_height * 0.5 + 62) if self.core.video_height > 0 else 360
-            self.resize(w, h)
+            self._resize_clamped(w, h)
             self.osd.show_osd("Window Size: 50% (0.5x)")
             return True
         if alt and keyval in (Gdk.KEY_2, Gdk.KEY_KP_2):
             w = self.core.video_width if self.core.video_width > 0 else 960
             h = (self.core.video_height + 62) if self.core.video_height > 0 else 580
-            self.resize(w, h)
+            self._resize_clamped(w, h)
             self.osd.show_osd("Window Size: 100% (Original Size)")
             return True
         if alt and keyval in (Gdk.KEY_3, Gdk.KEY_KP_3):
             w = int(self.core.video_width * 1.5) if self.core.video_width > 0 else 1280
             h = int(self.core.video_height * 1.5 + 62) if self.core.video_height > 0 else 720
-            self.resize(w, h)
+            self._resize_clamped(w, h)
             self.osd.show_osd("Window Size: 150% (1.5x)")
             return True
         if alt and keyval in (Gdk.KEY_4, Gdk.KEY_KP_4):
             w = int(self.core.video_width * 2.0) if self.core.video_width > 0 else 1920
             h = int(self.core.video_height * 2.0 + 62) if self.core.video_height > 0 else 1080
-            self.resize(w, h)
+            self._resize_clamped(w, h)
             self.osd.show_osd("Window Size: 200% (2.0x)")
             return True
 
@@ -1277,11 +1349,20 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id in ("CMD_OPEN_TORRENT", "ID_OPEN_TORRENT"):
             self._open_torrent_dialog()
         elif cmd_id == "CMD_OPEN_SCREEN_CAPTURE":
-            self.play_file("avdevice://lavfi:x11grab")
+            disp = os.environ.get("DISPLAY", ":0.0")
+            if ":" in disp and "." not in disp.split(":")[-1]:
+                disp = f"{disp}.0"
+            self.play_file(f"av://x11grab:{disp}")
             self.osd.show_osd("Screen Capture Device")
         elif cmd_id == "CMD_OPEN_WEBCAM":
-            self.play_file("v4l2:///dev/video0")
+            self.play_file("av://v4l2:/dev/video0")
             self.osd.show_osd("Webcam Device")
+        elif cmd_id == "CMD_OPEN_SPECIFIC_FILE":
+            if arg:
+                self.play_file(arg)
+        elif cmd_id == "CMD_CLEAR_RECENT_FILES":
+            self.db.clear_history()
+            self.osd.show_osd("Recent Files Cleared")
         elif cmd_id == "CMD_FULLSCREEN":
             self.toggle_fullscreen()
         elif cmd_id == "CMD_VIDEO_STRETCH":
@@ -1317,6 +1398,52 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id == "CMD_OSD_PLAYINFO":
             self.osd.toggle_tech_info()
             self.osd_layer.queue_draw()
+        elif cmd_id == "CMD_VIDEO_CODEC_FOURCC_MESSAGE":
+            self.show_media_info_dialog()
+        elif cmd_id == "CMD_AUDIO_CODEC_TYPE_MESSAGE":
+            self.core.cycle_audio_track()
+            aid = self.core.get_property("aid")
+            self.osd.show_osd(f"Audio Track Cycled (#{aid})" if aid and aid != "no" else "Audio Track: Off")
+        elif cmd_id == "CMD_AUDIO_OUT_NUM_CHANNEL_MESSAGE":
+            self.control_box.notebook.set_current_page(0)
+            self.control_box.show_all()
+        elif cmd_id == "CMD_TOGGLE_ALWAYS_ON_TOP":
+            self._is_keep_above = not getattr(self, "_is_keep_above", False)
+            self.set_keep_above(self._is_keep_above)
+            self.osd.show_osd(f"Stay on Top: {'ON' if self._is_keep_above else 'OFF'}")
+        elif cmd_id == "CMD_CLEAR_PLAYLIST":
+            self.playlist.clear()
+            self.current_index = -1
+            self.core.stop()
+            self.playlist_window.update_playlist(self.playlist)
+            self.osd.show_osd("Playlist Cleared")
+        elif cmd_id == "CMD_WINDOW_SIZE_50":
+            w = int(self.core.video_width * 0.5) if self.core.video_width > 0 else 640
+            h = int(self.core.video_height * 0.5 + 62) if self.core.video_height > 0 else 360
+            self._resize_clamped(w, h)
+            self.osd.show_osd("Window Size: 50% (0.5x)")
+        elif cmd_id == "CMD_WINDOW_SIZE_100":
+            w = self.core.video_width if self.core.video_width > 0 else 960
+            h = (self.core.video_height + 62) if self.core.video_height > 0 else 580
+            self._resize_clamped(w, h)
+            self.osd.show_osd("Window Size: 100% (Original Size)")
+        elif cmd_id == "CMD_WINDOW_SIZE_150":
+            w = int(self.core.video_width * 1.5) if self.core.video_width > 0 else 1280
+            h = int(self.core.video_height * 1.5 + 62) if self.core.video_height > 0 else 720
+            self._resize_clamped(w, h)
+            self.osd.show_osd("Window Size: 150% (1.5x)")
+        elif cmd_id == "CMD_WINDOW_SIZE_200":
+            w = int(self.core.video_width * 2.0) if self.core.video_width > 0 else 1920
+            h = int(self.core.video_height * 2.0 + 62) if self.core.video_height > 0 else 1080
+            self._resize_clamped(w, h)
+            self.osd.show_osd("Window Size: 200% (2.0x)")
+        elif cmd_id == "CMD_REPEAT_SET_A":
+            self.set_repeat_a()
+        elif cmd_id == "CMD_REPEAT_SET_B":
+            self.set_repeat_b()
+        elif cmd_id == "CMD_REPEAT_CLEAR":
+            self.core.clear_repeat()
+            self.osd.show_osd("A-B Repeat Cleared")
         elif cmd_id in ("CMD_TOGGLE_HWDEC", "CMD_VIDEO_OUT_HW_SW_MESSAGE"):
             self.core.toggle_hwdec()
             self.osd.show_osd(f"Hardware Acceleration: {'ON (HW)' if self.core.hwdec_active != 'no' else 'OFF (SW)'}")
@@ -1388,18 +1515,33 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id == "CMD_SUB_ONLINE_SEARCH":
             self.show_subtitle_search_dialog()
         elif cmd_id == "CMD_CAPTURE_FRAME":
-            fn = self.capture_mgr.generate_capture_filename()
-            if self.core.take_screenshot(fn):
-                self.osd.show_osd(f"Snapshot Saved: {os.path.basename(fn)}")
+            if not self.core.current_file:
+                self.osd.show_osd("Capture Failed: No active media")
+            else:
+                fn = self.capture_mgr.generate_capture_filename()
+                if self.core.take_screenshot(fn):
+                    self.osd.show_osd(f"Snapshot Saved: {os.path.basename(fn)}")
+                else:
+                    self.osd.show_osd("Capture Failed")
         elif cmd_id == "CMD_CAPTURE_FRAME_AS":
-            self._save_frame_as_dialog()
+            if not self.core.current_file:
+                self.osd.show_osd("Capture Failed: No active media")
+            else:
+                self._save_frame_as_dialog()
         elif cmd_id == "CMD_CAPTURE_TO_CLIPBOARD":
-            fn = self.capture_mgr.generate_capture_filename()
-            if self.core.take_screenshot(fn):
-                self.capture_mgr.copy_file_to_clipboard(fn)
-                self.osd.show_osd("Snapshot Copied to Clipboard")
+            if not self.core.current_file:
+                self.osd.show_osd("Capture Failed: No active media")
+            else:
+                fn = self.capture_mgr.generate_capture_filename()
+                if self.core.take_screenshot(fn):
+                    self.capture_mgr.copy_file_to_clipboard(fn)
+                    self.osd.show_osd("Snapshot Copied to Clipboard")
+                else:
+                    self.osd.show_osd("Capture Failed")
         elif cmd_id == "CMD_CREATE_GIF":
-            if self.core.current_file:
+            if not self.core.current_file:
+                self.osd.show_osd("GIF Creation Failed: No active media")
+            else:
                 cur_f = self.core.current_file
                 pos = self.core.position
                 self.osd.show_osd("Creating Animated GIF...")
@@ -1411,7 +1553,9 @@ class JonakiMainWindow(Gtk.Window):
                         GLib.idle_add(lambda: self.osd.show_osd("Failed to create GIF"))
                 threading.Thread(target=_worker_gif, daemon=True).start()
         elif cmd_id == "CMD_CREATE_STORYBOARD":
-            if self.core.current_file:
+            if not self.core.current_file:
+                self.osd.show_osd("Storyboard Failed: No active media")
+            else:
                 cur_f = self.core.current_file
                 dur = self.core.duration
                 self.osd.show_osd("Creating Storyboard...")
@@ -1439,7 +1583,8 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd(f"Secondary Subtitle Track: {sec_id or 'Off'}")
         elif cmd_id == "CMD_SET_ASPECT_RATIO":
             self.core.set_aspect_ratio_mode(str(arg))
-            self.osd.show_osd(f"Aspect Ratio: {arg}")
+            label = "Auto (Default)" if str(arg) == "-1" else str(arg)
+            self.osd.show_osd(f"Aspect Ratio: {label}")
         elif cmd_id == "CMD_VIDEO_HFLIP":
             act = self.core.toggle_horizontal_flip()
             self.osd.show_osd(f"Horizontal Flip: {'ON' if act else 'OFF'}")
@@ -1533,6 +1678,28 @@ class JonakiMainWindow(Gtk.Window):
             self._show_about_dialog()
         elif cmd_id == "CMD_APP_EXIT":
             self.close()
+
+    def _resize_clamped(self, w: int, h: int) -> None:
+        screen = self.get_screen()
+        if screen:
+            try:
+                display = screen.get_display()
+                monitor = display.get_primary_monitor() or display.get_monitor(0)
+                geom = monitor.get_geometry()
+                sw, sh = geom.width, geom.height
+            except Exception:
+                sw, sh = screen.get_width(), screen.get_height()
+            max_w = max(400, sw - 40)
+            max_h = max(300, sh - 80)
+            if w > max_w or h > max_h:
+                aspect = w / max(1, h)
+                if w / max_w > h / max_h:
+                    w = max_w
+                    h = int(w / aspect)
+                else:
+                    h = max_h
+                    w = int(h * aspect)
+        self.resize(max(320, int(w)), max(240, int(h)))
 
     def show_media_info_dialog(self) -> None:
         info = self.core.get_media_detailed_info()
@@ -1630,6 +1797,10 @@ class JonakiMainWindow(Gtk.Window):
                 "duration": 0.0
             })
         self.playlist_window.update_playlist(self.playlist)
+        try:
+            self.db.save_playlist(self.playlist)
+        except Exception as e:
+            print(f"[MediaDB] Failed to save playlist: {e}")
 
         if auto_play and len(self.playlist) > 0:
             target_index = start_index if start_index < len(self.playlist) else 0
@@ -1652,6 +1823,7 @@ class JonakiMainWindow(Gtk.Window):
         if 0 <= index < len(self.playlist):
             self._save_current_position()
             self.current_index = index
+            self.playlist_window.update_playlist(self.playlist)
             item = self.playlist[index]
             self.play_file(item["path"], seek_pts=seek_pts, sub_file=sub_file, audio_file=audio_file)
 
@@ -1668,6 +1840,9 @@ class JonakiMainWindow(Gtk.Window):
             self.play_index(len(self.playlist) - 1)
 
     def toggle_play_pause(self) -> None:
+        if not self.core.current_file and len(self.playlist) > 0:
+            self.play_index(max(0, self.current_index))
+            return
         self.core.play_pause()
 
     def remove_from_playlist(self, index: int) -> None:
@@ -1684,6 +1859,10 @@ class JonakiMainWindow(Gtk.Window):
             elif index < self.current_index:
                 self.current_index -= 1
             self.playlist_window.update_playlist(self.playlist)
+            try:
+                self.db.save_playlist(self.playlist)
+            except Exception as e:
+                print(f"[MediaDB] Failed to save playlist: {e}")
 
     def sort_playlist(self) -> None:
         cur_path = self.playlist[self.current_index]["path"] if 0 <= self.current_index < len(self.playlist) else None
@@ -1694,6 +1873,10 @@ class JonakiMainWindow(Gtk.Window):
                     self.current_index = i
                     break
         self.playlist_window.update_playlist(self.playlist)
+        try:
+            self.db.save_playlist(self.playlist)
+        except Exception as e:
+            print(f"[MediaDB] Failed to save playlist: {e}")
 
     def shuffle_playlist(self) -> None:
         cur_path = self.playlist[self.current_index]["path"] if 0 <= self.current_index < len(self.playlist) else None
@@ -1704,6 +1887,10 @@ class JonakiMainWindow(Gtk.Window):
                     self.current_index = i
                     break
         self.playlist_window.update_playlist(self.playlist)
+        try:
+            self.db.save_playlist(self.playlist)
+        except Exception as e:
+            print(f"[MediaDB] Failed to save playlist: {e}")
 
     def set_subtitle_size(self, size_pt: int) -> None:
         self.sub_mgr.font_size = size_pt
@@ -1996,6 +2183,10 @@ class JonakiMainWindow(Gtk.Window):
         if hasattr(self, "torrent_manager") and self.torrent_manager:
             self.torrent_manager.stop_session()
         self._save_current_position()
+        try:
+            self.db.save_playlist(self.playlist)
+        except Exception as e:
+            print(f"[MediaDB] Failed to save playlist on exit: {e}")
         self.core.stop_engine()
         if Gtk.main_level() > 0:
             Gtk.main_quit()

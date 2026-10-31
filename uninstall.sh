@@ -13,8 +13,8 @@ for arg in "$@"; do
     fi
 done
 
-rm -f "$HOME/.local/bin/jonaki" 2>/dev/null || true
-echo "[-] Removed $HOME/.local/bin/jonaki launcher"
+rm -f "$HOME/.local/bin/jonaki" "$HOME/.local/bin/potplayer" 2>/dev/null || true
+echo "[-] Removed launcher binaries"
 
 rm -f "$HOME/.local/share/applications/jonaki.desktop" 2>/dev/null || true
 echo "[-] Removed desktop entries"

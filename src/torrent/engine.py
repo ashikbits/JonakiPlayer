@@ -10,7 +10,7 @@ import sys
 import time
 import logging
 import threading
-from typing import List, Optional, Tuple, Callable
+from typing import List, Optional, Tuple, Callable, Any
 
 from .models import TorrentFileInfo, TorrentStatusInfo, is_video_file
 
@@ -246,13 +246,21 @@ class TorrentEngine:
 
         return False
 
+    def _ti_files(self, ti: Any):
+        if hasattr(ti, "orig_files"):
+            try:
+                return ti.orig_files()
+            except Exception:
+                pass
+        return ti.files()
+
     def get_files(self) -> List[TorrentFileInfo]:
         """Returns the list of files contained in the torrent metadata."""
         with self._lock:
             if not self.torrent_info:
                 return []
             ti = self.torrent_info
-            files = ti.files()
+            files = self._ti_files(ti)
             result: List[TorrentFileInfo] = []
             for idx in range(ti.num_files()):
                 p = files.file_path(idx)
@@ -324,7 +332,7 @@ class TorrentEngine:
             ):
                 return None
             save_path = self.handle.status().save_path
-            rel_path = self.torrent_info.files().file_path(self.selected_file_index)
+            rel_path = self._ti_files(self.torrent_info).file_path(self.selected_file_index)
             return os.path.join(save_path, rel_path)
 
     def get_selected_file_size(self) -> int:
@@ -335,7 +343,7 @@ class TorrentEngine:
                 or self.selected_file_index is None
             ):
                 return 0
-            return self.torrent_info.files().file_size(self.selected_file_index)
+            return self._ti_files(self.torrent_info).file_size(self.selected_file_index)
 
     def get_piece_range_for_file(self, file_index: int) -> Tuple[int, int]:
         """Returns (first_piece_index, last_piece_index) for the given file."""
@@ -343,7 +351,7 @@ class TorrentEngine:
             if not self.torrent_info:
                 return (0, 0)
             ti = self.torrent_info
-            size = ti.files().file_size(file_index)
+            size = self._ti_files(ti).file_size(file_index)
             if size == 0:
                 return (0, 0)
             req_start = ti.map_file(file_index, 0, 1)

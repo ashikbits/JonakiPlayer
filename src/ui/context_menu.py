@@ -4,10 +4,11 @@ Builds the complete right-click popup menu with full playback control.
 Includes dynamic audio/subtitle stream selection, dual subtitles, aspect ratios, and video orientation.
 """
 
+import os
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
-from typing import Callable, Any, Optional
+from typing import Callable, Any, Optional, List, Dict
 
 
 class PotContextMenu:
@@ -25,6 +26,7 @@ class PotContextMenu:
         self.aspect_menu = Gtk.Menu()
         self.orientation_menu = Gtk.Menu()
         self.bookmarks_menu = Gtk.Menu()
+        self.recent_menu = Gtk.Menu()
 
         self._build_menu()
 
@@ -40,6 +42,10 @@ class PotContextMenu:
         self._add_separator(open_menu)
         self._add_action(open_menu, "Open Screen Capture", "CMD_OPEN_SCREEN_CAPTURE")
         self._add_action(open_menu, "Open Webcam / Device \tCtrl+J", "CMD_OPEN_WEBCAM")
+        self._add_separator(open_menu)
+        recent_item = Gtk.MenuItem(label="Recent Files")
+        recent_item.set_submenu(self.recent_menu)
+        open_menu.append(recent_item)
         open_item.set_submenu(open_menu)
         self.menu.append(open_item)
 
@@ -71,12 +77,23 @@ class PotContextMenu:
         self._add_action(self.bookmarks_menu, "Clear Bookmarks for Current File", "CMD_BOOKMARK_CLEAR")
         playback_menu.append(bm_item)
 
+        # A-B Repeat submenu
+        ab_item = Gtk.MenuItem(label="A-B Repeat")
+        ab_menu = Gtk.Menu()
+        self._add_action(ab_menu, "Set A (Start) \t[", "CMD_REPEAT_SET_A")
+        self._add_action(ab_menu, "Set B (End) \t]", "CMD_REPEAT_SET_B")
+        self._add_separator(ab_menu)
+        self._add_action(ab_menu, "Clear Repeat \t\\", "CMD_REPEAT_CLEAR")
+        ab_item.set_submenu(ab_menu)
+        playback_menu.append(ab_item)
+
         playback_item.set_submenu(playback_menu)
         self.menu.append(playback_item)
 
         # Direct Play/Pause & Fullscreen shortcuts in root
         self._add_action(self.menu, "Fullscreen \tEnter", "CMD_FULLSCREEN")
         self._add_action(self.menu, "Stretch Video (Fill Window) \tCtrl+Enter", "CMD_VIDEO_STRETCH")
+        self._add_action(self.menu, "Stay on Top \tCtrl+T", "CMD_TOGGLE_ALWAYS_ON_TOP")
 
         self._add_separator(self.menu)
 
@@ -89,6 +106,20 @@ class PotContextMenu:
         self._add_action(video_menu, "Toggle HDR Tone-Mapping \tCtrl+H", "CMD_TOGGLE_HDR")
         self._add_action(video_menu, "Reset Video Colors \tQ", "CMD_COLOR_RESET")
         self._add_separator(video_menu)
+
+        # Window & Frame Size submenu
+        win_size_item = Gtk.MenuItem(label="Window Size")
+        win_size_menu = Gtk.Menu()
+        self._add_action(win_size_menu, "50% (0.5x) \tAlt+1", "CMD_WINDOW_SIZE_50")
+        self._add_action(win_size_menu, "100% (Original) \tAlt+2", "CMD_WINDOW_SIZE_100")
+        self._add_action(win_size_menu, "150% (1.5x) \tAlt+3", "CMD_WINDOW_SIZE_150")
+        self._add_action(win_size_menu, "200% (2.0x) \tAlt+4", "CMD_WINDOW_SIZE_200")
+        self._add_separator(win_size_menu)
+        self._add_action(win_size_menu, "Zoom In (+5%) \tNumPad +", "CMD_VIDEO_ZOOM_IN")
+        self._add_action(win_size_menu, "Zoom Out (-5%) \tNumPad -", "CMD_VIDEO_ZOOM_OUT")
+        self._add_action(win_size_menu, "Reset Zoom / Dimensions (100%) \tNumPad 5", "CMD_VIDEO_SCALE_RESET")
+        win_size_item.set_submenu(win_size_menu)
+        video_menu.append(win_size_item)
 
         # Aspect Ratio Submenu
         aspect_item = Gtk.MenuItem(label="Aspect Ratio")
@@ -244,6 +275,29 @@ class PotContextMenu:
         Dynamically populates Audio Streams, Subtitle Tracks, and Secondary Subtitle tracks
         from the live core engine.
         """
+        # 0. Aspect Ratio Checkmarks
+        cur_aspect = getattr(core, "aspect_ratio_mode", "-1")
+        for child in self.aspect_menu.get_children():
+            self.aspect_menu.remove(child)
+            child.destroy()
+        modes = [
+            ("Auto (Keep Aspect Ratio)", "-1"),
+            ("Stretch to Window / Screen \tCtrl+Enter", "stretch"),
+            ("16:9 Wide Preserved", "16:9"),
+            ("4:3 Standard", "4:3"),
+            ("2.35:1 CinemaScope", "2.35:1"),
+            ("1.85:1 VistaVision", "1.85:1")
+        ]
+        for label, val in modes:
+            prefix = "✓ " if str(val) == str(cur_aspect) else "   "
+            item = Gtk.MenuItem(label=f"{prefix}{label}")
+            if val == "stretch":
+                item.connect("activate", lambda w: self.dispatch("CMD_VIDEO_STRETCH", None))
+            else:
+                item.connect("activate", lambda w, m=val: self.dispatch("CMD_SET_ASPECT_RATIO", m))
+            self.aspect_menu.append(item)
+        self.aspect_menu.show_all()
+
         # 1. Audio Tracks
         for child in self.audio_streams_menu.get_children():
             self.audio_streams_menu.remove(child)
@@ -344,10 +398,40 @@ class PotContextMenu:
         sep = Gtk.SeparatorMenuItem()
         parent_menu.append(sep)
 
-    def popup(self, event: Optional[Any] = None, core: Optional[Any] = None) -> None:
+    def refresh_recent_menu(self, recent_files: Optional[List[Dict[str, Any]]] = None) -> None:
+        for child in self.recent_menu.get_children():
+            self.recent_menu.remove(child)
+            child.destroy()
+
+        if recent_files:
+            for item in recent_files[:15]:
+                fp = item.get("file_path") or item.get("path")
+                if not fp:
+                    continue
+                title = item.get("title") or os.path.basename(fp)
+                mi = Gtk.MenuItem(label=title)
+                mi.connect("activate", lambda w, p=fp: self.dispatch("CMD_OPEN_SPECIFIC_FILE", p))
+                self.recent_menu.append(mi)
+            self._add_separator(self.recent_menu)
+            clear_item = Gtk.MenuItem(label="Clear Recent Files")
+            clear_item.connect("activate", lambda w: self.dispatch("CMD_CLEAR_RECENT_FILES", None))
+            self.recent_menu.append(clear_item)
+        else:
+            none_item = Gtk.MenuItem(label="No Recent Files")
+            none_item.set_sensitive(False)
+            self.recent_menu.append(none_item)
+
+        self.recent_menu.show_all()
+
+    def popup(self, event: Optional[Any] = None, core: Optional[Any] = None, recent_files: Optional[List[Dict[str, Any]]] = None) -> None:
         if core is not None:
             try:
                 self.refresh_dynamic_menus(core)
+            except Exception:
+                pass
+        if recent_files is not None:
+            try:
+                self.refresh_recent_menu(recent_files)
             except Exception:
                 pass
         self.menu.show_all()

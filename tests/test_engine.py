@@ -291,7 +291,14 @@ class TestJonakiCore(unittest.TestCase):
         self.core.on_state_change = lambda st: state_changes.append(st)
         self.core.on_time_update = lambda p, d: time_updates.append((p, d))
 
-        # Play / Pause / PlayPause
+        # Verify play/pause without file does not change state (DEF-PLY-03)
+        self.core.play()
+        self.assertEqual(self.core.state, PlaybackState.IDLE)
+        self.core.play_pause()
+        self.assertEqual(self.core.state, PlaybackState.IDLE)
+
+        # Play / Pause / PlayPause with loaded file
+        self.core.current_file = "corpus/valid_h264_aac.mp4"
         self.core.play()
         self.assertEqual(self.core.state, PlaybackState.PLAYING)
         self.assertIn(PlaybackState.PLAYING, state_changes)
@@ -324,8 +331,9 @@ class TestJonakiCore(unittest.TestCase):
             mock_cmd.assert_called_with("cycle audio")
 
         # Callbacks invocation via tick
-        with unittest.mock.patch.object(self.core, "get_property_float", side_effect=lambda prop, default=0.0: 15.0 if prop == "time-pos" else (100.0 if prop == "duration" else default)):
-            self.core._query_time_tick()
+        with unittest.mock.patch.object(self.core, "get_property", return_value="no"):
+            with unittest.mock.patch.object(self.core, "get_property_float", side_effect=lambda prop, default=0.0: 15.0 if prop == "time-pos" else (100.0 if prop == "duration" else default)):
+                self.core._query_time_tick()
         self.assertIn((15.0, 100.0), time_updates)
 
         # Audio delay, HDR toggle, speed

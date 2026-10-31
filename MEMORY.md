@@ -1,4 +1,4 @@
-# Jonaki for Linux (formerly Jonaki for Linux) — Project Memory & Implementation Ledger
+# Jonaki for Linux — Project Memory & Implementation Ledger
 
 **Last Updated:** 2026-10-26 01:12:00 (UTC+6)  
 **Target Platform:** Linux (Debian 13 Trixie / Ubuntu 24.04+ / Fedora 40+ / Arch)  

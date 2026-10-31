@@ -294,6 +294,7 @@ class SubtitleSearchDialog(Gtk.Dialog):
             return
 
         title = model[tree_iter][0]
+        lang = str(model[tree_iter][1]).strip().lower()
         fmt = model[tree_iter][2].lower()
         url = model[tree_iter][4]
 
@@ -305,9 +306,25 @@ class SubtitleSearchDialog(Gtk.Dialog):
         self.status_label.set_text(f"Downloading '{title}'...")
         self.download_btn.set_sensitive(False)
 
-        # Target temporary path
+        # Target destination path: save alongside video file if accessible
         ext = fmt if fmt in ("srt", "ass", "vtt", "sub") else "srt"
-        dest_path = os.path.join(tempfile.gettempdir(), f"jonaki_sub_{os.getpid()}_{hash(url) & 0xFFFFFFFF}.{ext}")
+        dest_path = None
+        if self.current_file and os.path.exists(self.current_file):
+            video_dir = os.path.dirname(os.path.abspath(self.current_file))
+            base_name = os.path.splitext(os.path.basename(self.current_file))[0]
+            prefix = f"{base_name}.{lang}" if lang else base_name
+            candidate = os.path.join(video_dir, f"{prefix}.{ext}")
+            if os.path.exists(candidate):
+                counter = 1
+                while os.path.exists(os.path.join(video_dir, f"{prefix}.{counter}.{ext}")):
+                    counter += 1
+                candidate = os.path.join(video_dir, f"{prefix}.{counter}.{ext}")
+            if os.access(video_dir, os.W_OK):
+                dest_path = candidate
+        if not dest_path:
+            cache_dir = os.path.expanduser("~/.cache/jonaki/subtitles")
+            os.makedirs(cache_dir, exist_ok=True)
+            dest_path = os.path.join(cache_dir, f"sub_{hash(url) & 0xFFFFFFFF}.{ext}")
 
         def _download_worker():
             success = self.client.download_subtitle(url, dest_path)
