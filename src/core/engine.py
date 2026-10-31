@@ -930,6 +930,56 @@ class JonakiCore:
         self.set_property("sub-pos", str(self.sub_pos))
         return self.sub_pos
 
+    def apply_subtitle_style(self, style: Any) -> None:
+        """
+        Applies comprehensive subtitle style configuration (font, colors, outline, shadow, position, alignment).
+        """
+        if hasattr(style, "font_family"):
+            self.set_property("sub-font", style.font_family)
+        if hasattr(style, "font_size"):
+            self.sub_size = max(12, min(96, int(style.font_size)))
+            self.set_property("sub-font-size", str(self.sub_size))
+        if hasattr(style, "bold"):
+            self.set_property("sub-bold", "yes" if style.bold else "no")
+        if hasattr(style, "italic"):
+            self.set_property("sub-italic", "yes" if style.italic else "no")
+        if hasattr(style, "primary_color"):
+            self.set_property("sub-color", style.primary_color)
+        if hasattr(style, "outline_color"):
+            self.set_property("sub-border-color", style.outline_color)
+        if hasattr(style, "outline_width"):
+            self.set_property("sub-border-size", str(style.outline_width))
+        if hasattr(style, "shadow_color"):
+            self.set_property("sub-shadow-color", style.shadow_color)
+        if hasattr(style, "shadow_offset"):
+            self.set_property("sub-shadow-offset", str(style.shadow_offset))
+        if hasattr(style, "back_color") and hasattr(style, "back_alpha"):
+            # Compute alpha hex prefix if alpha > 0
+            if getattr(style, "back_alpha", 0.0) > 0.0:
+                alpha_int = int(min(1.0, max(0.0, style.back_alpha)) * 255)
+                clean_hex = style.back_color.lstrip("#")
+                if len(clean_hex) == 6:
+                    self.set_property("sub-back-color", f"#{alpha_int:02X}{clean_hex}")
+                else:
+                    self.set_property("sub-back-color", style.back_color)
+            else:
+                self.set_property("sub-back-color", "#00000000")
+        if hasattr(style, "pos"):
+            self.sub_pos = max(0, min(150, int(style.pos)))
+            self.set_property("sub-pos", str(self.sub_pos))
+        if hasattr(style, "margin_y"):
+            self.set_property("sub-margin-y", str(int(style.margin_y)))
+        if hasattr(style, "margin_x"):
+            self.set_property("sub-margin-x", str(int(style.margin_x)))
+        if hasattr(style, "align_x"):
+            self.set_property("sub-align-x", str(style.align_x))
+        if hasattr(style, "align_y"):
+            self.set_property("sub-align-y", str(style.align_y))
+        if hasattr(style, "spacing"):
+            self.set_property("sub-spacing", str(style.spacing))
+        if hasattr(style, "ass_override"):
+            self.set_property("sub-ass-override", str(style.ass_override))
+
     # --- Tracks (Audio, Subtitle, Video) & Dual Subtitles ---
 
     def get_track_list(self) -> List[Dict[str, Any]]:

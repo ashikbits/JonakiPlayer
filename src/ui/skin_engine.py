@@ -228,6 +228,25 @@ class PotSkinEngine:
             self.badge_channel
         ]
 
+        # Top Bar buttons (Main.png, matching TopCommon.txt layout)
+        # Left Logo/Menu button (Jonaki branded 76x22 pill button)
+        self.btn_top_menu = SkinButton("CMD_MAIN_MENU", "Main Menu (Jonaki)", 76, 22, 485, 34, 41, 14, align="Left")
+        self.btn_top_menu.label_text = "Jonaki"
+
+        # Right window buttons (14x13 window controls in Main.png at y=20 and y=68)
+        self.btn_top_close = SkinButton("CMD_APP_EXIT", "Close (Alt+F4)", 14, 13, 260, 20, 14, 13, align="Right")
+        self.btn_top_restore = SkinButton("CMD_FULLSCREEN", "Restore Window (Enter)", 14, 13, 130, 20, 14, 13, align="Right")
+        self.btn_top_min = SkinButton("CMD_MIN_WINDOW", "Minimize", 14, 13, 0, 20, 14, 13, align="Right")
+        self.btn_top_ontop = SkinButton("ID_ETC_NEXTONTOP", "Always on Top (Ctrl+T)", 14, 13, 485, 68, 14, 13, align="Right")
+
+        self.top_buttons = [
+            self.btn_top_menu,
+            self.btn_top_ontop,
+            self.btn_top_min,
+            self.btn_top_restore,
+            self.btn_top_close
+        ]
+
     @staticmethod
     def draw_3slice(cr: cairo.Context, surf: cairo.ImageSurface,
                     dx: int, dy: int, dw: int, dh: int,
@@ -625,6 +644,173 @@ class PotSkinEngine:
             cr.paint()
             cr.restore()
         cr.restore()
+
+    def render_top_bar(self, cr: cairo.Context, width: int, height: int,
+                       title: str = "Jonaki", is_fullscreen: bool = True,
+                       file_type: str = "", is_keep_above: bool = False) -> None:
+        """
+        Renders the fullscreen top bar overlay with authentic TopCommon.txt layout:
+        [PotPlayer / Jonaki Menu Button] [File Extension] | [Title Label] ... [Pin On Top] [Min] [Restore] [Close]
+        """
+        if width <= 0 or height <= 0:
+            return
+
+        main_surf = self.surfaces.get("Main.png")
+        cr.save()
+
+        # Background: Authentic TopCommon 3-slice background (ImageLeft=3, ImageTop=490, ImageWidth=347, ImageHeight=31)
+        if main_surf:
+            self.draw_3slice(cr, main_surf, 0, 0, width, height, 3, 490, 347, 31, 20, 20)
+        else:
+            cr.set_source_rgba(0.12, 0.12, 0.12, 0.95)
+            cr.rectangle(0, 0, width, height)
+            cr.fill()
+
+        # Bottom accent divider line (matching TopCommon line)
+        cr.set_source_rgba(0.25, 0.25, 0.25, 0.8)
+        cr.set_line_width(1.0)
+        cr.move_to(0, height - 0.5)
+        cr.line_to(width, height - 0.5)
+        cr.stroke()
+
+        # 1. Left Section: Logo / Menu Button (Jonaki branded menu button)
+        menu_btn = self.btn_top_menu
+        menu_y = max(0, (height - menu_btn.height) // 2)
+        menu_btn.rect = (4, menu_y, menu_btn.width, menu_btn.height)
+
+        # Draw branded 3-slice button background
+        if main_surf:
+            pill_src_x = 485 + (menu_btn.state * 41)
+            self.draw_3slice(cr, main_surf, menu_btn.rect[0], menu_btn.rect[1],
+                             menu_btn.rect[2], menu_btn.rect[3],
+                             pill_src_x, 34, 41, 14, 5, 5)
+
+        # Draw Jonaki logo emblem inside button
+        jonaki_logo = self.surfaces.get("jonaki.png")
+        icon_size = 14
+        icon_x = menu_btn.rect[0] + 5
+        icon_y = menu_btn.rect[1] + (menu_btn.rect[3] - icon_size) // 2
+        if jonaki_logo:
+            cr.save()
+            cr.translate(icon_x, icon_y)
+            cr.scale(icon_size / jonaki_logo.get_width(), icon_size / jonaki_logo.get_height())
+            cr.set_source_surface(jonaki_logo, 0, 0)
+            cr.paint()
+            cr.restore()
+
+        # Draw 'Jonaki' text label inside button
+        cr.save()
+        if menu_btn.state == 1:  # Hover
+            cr.set_source_rgba(1.0, 1.0, 1.0, 1.0)
+        elif menu_btn.state == 2:  # Down
+            cr.set_source_rgba(0.7, 0.85, 1.0, 1.0)
+        else:
+            cr.set_source_rgba(0.90, 0.90, 0.92, 0.95)
+        cr.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(11.0)
+        cr.move_to(icon_x + icon_size + 4, menu_btn.rect[1] + menu_btn.rect[3] / 2 + 3.5)
+        cr.show_text("Jonaki")
+        cr.restore()
+
+        left_offset = menu_btn.rect[0] + menu_btn.width + 8
+
+        # File type / format badge if available
+        if file_type and width > 400:
+            cr.save()
+            cr.set_source_rgba(0.75, 0.75, 0.78, 0.9)
+            cr.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(11.0)
+            clean_type = file_type.upper().lstrip(".")[:5]
+            ext_w = cr.text_extents(clean_type).width
+            cr.move_to(left_offset, height / 2 + 4.0)
+            cr.show_text(clean_type)
+            left_offset += ext_w + 6
+
+            # Small vertical divider bar (ImageLeft=364, ImageTop=43, ImageWidth=3, ImageHeight=10)
+            if main_surf:
+                cr.rectangle(left_offset, (height - 10) // 2, 3, 10)
+                cr.clip()
+                cr.set_source_surface(main_surf, left_offset - 364, ((height - 10) // 2) - 43)
+                cr.paint()
+            left_offset += 10
+            cr.restore()
+
+        # 2. Right Section: Window controls & Always on Top
+        btn_y = (height - 13) // 2
+        right_margin = 10
+        spacing = 10
+
+        # Rightmost buttons in order: Close, Restore, Min, Pin on Top
+        right_buttons = [
+            self.btn_top_close,
+            self.btn_top_restore,
+            self.btn_top_min,
+            self.btn_top_ontop
+        ]
+
+        x_cur = width - right_margin
+        for btn in right_buttons:
+            x_cur -= btn.width
+            btn.rect = (x_cur, btn_y, btn.width, btn.height)
+            if main_surf:
+                # Handle always-on-top state sprite (485, 68 for off, 550, 68 for active)
+                if btn == self.btn_top_ontop and is_keep_above:
+                    src_x = 550 + (btn.state * btn.width)
+                else:
+                    src_x = btn.img_left + (btn.state * btn.width)
+                src_y = btn.img_top
+
+                cr.save()
+                cr.rectangle(btn.rect[0], btn.rect[1], btn.rect[2], btn.rect[3])
+                cr.clip()
+                cr.set_source_surface(main_surf, btn.rect[0] - src_x, btn.rect[1] - src_y)
+                cr.paint()
+                cr.restore()
+            x_cur -= spacing
+
+        # Small vertical separator line before window buttons (ImageLeft=0, ImageTop=487, ImageWidth=1, ImageHeight=31)
+        if main_surf:
+            sep_x = x_cur + 2
+            cr.save()
+            cr.rectangle(sep_x, (height - 20) // 2, 1, 20)
+            cr.clip()
+            cr.set_source_surface(main_surf, sep_x, ((height - 20) // 2) - 487)
+            cr.paint()
+            cr.restore()
+        x_cur -= 10
+
+        # 3. Middle Section: Media Title / Caption Label
+        avail_width = max(50, x_cur - left_offset - 10)
+        cr.set_source_rgba(0.94, 0.94, 0.94, 0.98)
+        cr.select_font_face("sans-serif", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(12.0)
+
+        display_title = title or "Jonaki"
+        extents = cr.text_extents(display_title)
+        if extents.width > avail_width and len(display_title) > 8:
+            while len(display_title) > 5 and cr.text_extents(display_title + "...").width > avail_width:
+                display_title = display_title[:-1]
+            display_title += "..."
+
+        text_y = height / 2 + 4.0
+        cr.move_to(left_offset, text_y)
+        cr.show_text(display_title)
+
+        cr.restore()
+
+    def hit_test_top_bar(self, x: int, y: int) -> Optional[Any]:
+        """
+        Hit-test for top bar buttons.
+        """
+        if self.scale_factor != 1.0 and self.scale_factor > 0:
+            x = int(x / self.scale_factor)
+            y = int(y / self.scale_factor)
+
+        for btn in self.top_buttons:
+            bx, by, bw, bh = btn.rect
+            if bx - 2 <= x <= bx + bw + 2 and by - 2 <= y <= by + bh + 2:
+                return btn
+        return None
 
     def _format_time(self, seconds: Optional[float], total_duration: Optional[float] = None) -> str:
         if seconds is None or math.isnan(seconds) or math.isinf(seconds):

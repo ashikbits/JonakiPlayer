@@ -356,6 +356,106 @@ class TestSubtitleAndMPRIS(unittest.TestCase):
         service.notify_playback_changed()
         mock_conn.emit_signal.assert_called_once()
 
+    def test_subtitle_style_and_persistence(self):
+        from subtitle.subtitle_manager import SubtitleManager, SubtitleStyle
+        from ui.subtitle_style_dialog import SubtitleStyleDialog
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+            cfg_path = tf.name
+
+        try:
+            mgr = SubtitleManager(config_file=cfg_path)
+            self.assertEqual(mgr.style.font_family, "sans-serif")
+            self.assertEqual(mgr.style.font_size, 48)
+
+            # Modify style
+            mgr.style.font_family = "DejaVu Sans"
+            mgr.style.font_size = 52
+            mgr.style.bold = True
+            mgr.style.primary_color = "#FFD700"
+            mgr.style.outline_color = "#1A1A1A"
+            mgr.style.outline_width = 4.0
+            mgr.style.shadow_color = "#000000"
+            mgr.style.shadow_offset = 2.5
+            mgr.style.back_color = "#000000"
+            mgr.style.back_alpha = 0.5
+            mgr.style.pos = 92
+            mgr.style.margin_y = 45
+            mgr.style.margin_x = 25
+            mgr.style.align_x = "center"
+            mgr.style.align_y = "bottom"
+            mgr.style.spacing = 1.5
+            mgr.style.ass_override = "force"
+
+            # Save and verify JSON file exists
+            self.assertTrue(mgr.save_style_config())
+            self.assertTrue(os.path.exists(cfg_path))
+
+            # Reload into new manager instance
+            mgr2 = SubtitleManager(config_file=cfg_path)
+            self.assertEqual(mgr2.style.font_family, "DejaVu Sans")
+            self.assertEqual(mgr2.style.font_size, 52)
+            self.assertTrue(mgr2.style.bold)
+            self.assertEqual(mgr2.style.primary_color, "#FFD700")
+            self.assertEqual(mgr2.style.outline_color, "#1A1A1A")
+            self.assertEqual(mgr2.style.outline_width, 4.0)
+            self.assertEqual(mgr2.style.shadow_offset, 2.5)
+            self.assertEqual(mgr2.style.back_alpha, 0.5)
+            self.assertEqual(mgr2.style.pos, 92)
+            self.assertEqual(mgr2.style.margin_y, 45)
+            self.assertEqual(mgr2.style.margin_x, 25)
+            self.assertEqual(mgr2.style.spacing, 1.5)
+            self.assertEqual(mgr2.style.ass_override, "force")
+
+            # Test SubtitleStyleDialog creation and apply callback
+            applied_styles = []
+            dialog = SubtitleStyleDialog(None, mgr2.style, lambda s: applied_styles.append(s))
+            self.assertIsNotNone(dialog)
+            # Update UI widget directly to simulate user input
+            dialog.size_spin.set_value(60)
+            dialog._on_dialog_response(dialog, 101)  # 101 is Apply button
+            self.assertEqual(len(applied_styles), 1)
+            self.assertEqual(applied_styles[0].font_size, 60)
+            dialog.destroy()
+        finally:
+            if os.path.exists(cfg_path):
+                os.remove(cfg_path)
+
+    def test_engine_apply_subtitle_style(self):
+        from core.engine import JonakiCore
+        from subtitle.subtitle_manager import SubtitleStyle
+
+        core = JonakiCore()
+        style = SubtitleStyle(
+            font_family="Ubuntu",
+            font_size=42,
+            bold=True,
+            italic=False,
+            primary_color="#FFFF00",
+            outline_color="#222222",
+            outline_width=2.5,
+            shadow_color="#000000",
+            shadow_offset=1.5,
+            back_color="#000000",
+            back_alpha=0.6,
+            pos=90,
+            margin_y=30,
+            margin_x=20,
+            align_x="center",
+            align_y="bottom",
+            spacing=1.0,
+            ass_override="yes"
+        )
+        core.apply_subtitle_style(style)
+
+        self.assertEqual(core.get_property("sub-font"), "Ubuntu")
+        self.assertEqual(int(float(core.get_property("sub-font-size"))), 42)
+        self.assertEqual(core.get_property("sub-bold"), "yes")
+        self.assertEqual(core.get_property("sub-italic"), "no")
+        self.assertEqual(int(float(core.get_property("sub-pos"))), 90)
+        self.assertEqual(core.get_property("sub-ass-override"), "yes")
+        core.stop_engine()
+
 
 if __name__ == "__main__":
     unittest.main()

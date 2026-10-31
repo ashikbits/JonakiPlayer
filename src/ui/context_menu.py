@@ -227,6 +227,7 @@ class PotContextMenu:
         self._add_action(sub_menu, "Sync +0.5s \tAlt+Right", "CMD_SUB_SYNC_PLUS_500")
         self._add_action(sub_menu, "Reset Sync \tAlt+/", "CMD_SUB_SYNC_RESET")
         self._add_separator(sub_menu)
+        self._add_action(sub_menu, "Subtitle Style Settings... \tAlt+E", "CMD_SUB_STYLE_SETTINGS")
         self._add_action(sub_menu, "Real-Time AI Subtitle Translation", "CMD_SUB_TRANSLATE_TOGGLE")
         self._add_action(sub_menu, "Search Subtitles Online... \tCtrl+Alt+S", "CMD_SUB_ONLINE_SEARCH")
         sub_item.set_submenu(sub_menu)

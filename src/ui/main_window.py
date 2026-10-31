@@ -21,6 +21,7 @@ from typing import Optional, List, Dict, Any
 from core.engine import JonakiCore, PlaybackState
 from core.media_db import MediaDatabase
 from core.mpris import MPRIS2Service
+from core.power_manager import PowerInhibitor
 from ui.skin_engine import PotSkinEngine
 from ui.osd_overlay import OSDOverlay
 from ui.context_menu import PotContextMenu
@@ -28,6 +29,7 @@ from ui.control_box import ControlBoxDialog
 from ui.playlist_view import PlaylistWindow
 from ui.media_info_dialog import MediaInfoDialog
 from ui.subtitle_search_dialog import SubtitleSearchDialog
+from ui.subtitle_style_dialog import SubtitleStyleDialog
 from audio.equalizer import EqualizerModel
 from audio.dsp_chain import AudioDSPChain
 from video.shader_manager import VideoShaderManager
@@ -124,6 +126,7 @@ class JonakiMainWindow(Gtk.Window):
         self.skin = PotSkinEngine()
         self.osd = OSDOverlay()
         self.torrent_manager = TorrentStreamManager()
+        self.power_inhibitor = PowerInhibitor()
 
         # Playback playlist queue
         self.playlist: List[Dict[str, Any]] = []
@@ -201,11 +204,36 @@ class JonakiMainWindow(Gtk.Window):
         self.osd_layer.connect("enter-notify-event", self._on_mouse_motion)
         self.video_overlay.add_overlay(self.osd_layer)
         self.video_overlay.set_overlay_pass_through(self.osd_layer, True)
+
+        # Fullscreen Top Bar Overlay (32px: media title + window minimize/restore/close)
+        self.top_bar = Gtk.DrawingArea()
+        self.top_bar.set_size_request(-1, 32)
+        self.top_bar.set_valign(Gtk.Align.START)
+        self.top_bar.set_halign(Gtk.Align.FILL)
+        self.top_bar.set_no_show_all(True)
+        if rgba:
+            self.top_bar.set_visual(rgba)
+        self.top_bar.set_app_paintable(True)
+        self.top_bar.connect("draw", self._on_draw_top_bar)
+        self.top_bar.add_events(Gdk.EventMask.BUTTON_PRESS_MASK |
+                                Gdk.EventMask.BUTTON_RELEASE_MASK |
+                                Gdk.EventMask.POINTER_MOTION_MASK |
+                                Gdk.EventMask.ENTER_NOTIFY_MASK |
+                                Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self.top_bar.connect("button-press-event", self._on_top_bar_button_press)
+        self.top_bar.connect("motion-notify-event", self._on_top_bar_motion)
+        self.top_bar.connect("leave-notify-event", self._on_top_bar_leave)
+        self.top_bar.connect("enter-notify-event", self._on_mouse_motion)
+        self.video_overlay.add_overlay(self.top_bar)
+
         self.main_box.pack_start(self.video_overlay, True, True, 0)
 
         # Bottom Skin Control Bar Area (62px: 22px upper slider strip + 40px lower button strip)
+        # Positioned inside video_overlay at bottom (valign=END) so hiding/showing it never resizes video
         self.skin_area = Gtk.DrawingArea()
         self.skin_area.set_size_request(-1, 62)
+        self.skin_area.set_valign(Gtk.Align.END)
+        self.skin_area.set_halign(Gtk.Align.FILL)
         self.skin_area.connect("draw", self._on_draw_skin_area)
         self.skin_area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK |
                                  Gdk.EventMask.BUTTON_RELEASE_MASK |
@@ -217,7 +245,7 @@ class JonakiMainWindow(Gtk.Window):
         self.skin_area.connect("motion-notify-event", self._on_skin_motion)
         self.skin_area.connect("enter-notify-event", self._on_mouse_motion)
         self.skin_area.connect("scroll-event", self._on_skin_scroll)
-        self.main_box.pack_end(self.skin_area, False, False, 0)
+        self.video_overlay.add_overlay(self.skin_area)
 
         # Right-click context menu
         self.context_menu = PotContextMenu(self.handle_command)
@@ -294,6 +322,7 @@ class JonakiMainWindow(Gtk.Window):
             self.core.set_wid(wid)
 
         self.apply_audio_filters()
+        self.apply_subtitle_style()
 
         if getattr(self, "_pending_playback", None):
             pending = self._pending_playback
@@ -402,9 +431,11 @@ class JonakiMainWindow(Gtk.Window):
         # Auto-hide controls in fullscreen & cursor during active playback
         if self.core.state == PlaybackState.PLAYING:
             if time.time() - self._last_mouse_move_time > 2.5:
-                # In fullscreen, auto-hide the bottom skin control bar
+                # In fullscreen, auto-hide the bottom skin control bar and top bar
                 if self.is_fullscreen and self._controls_visible:
                     self.skin_area.hide()
+                    if hasattr(self, "top_bar") and self.top_bar:
+                        self.top_bar.hide()
                     self._controls_visible = False
                 # Auto-hide cursor over video after 2.5 seconds of inactivity
                 if self._cursor_visible:
@@ -415,6 +446,8 @@ class JonakiMainWindow(Gtk.Window):
                 self._set_cursor_visible(True)
             if not self._controls_visible:
                 self.skin_area.show()
+                if self.is_fullscreen and hasattr(self, "top_bar") and self.top_bar:
+                    self.top_bar.show()
                 self._controls_visible = True
         return True
 
@@ -593,6 +626,65 @@ class JonakiMainWindow(Gtk.Window):
                          repeat_a=self.core.repeat_a, repeat_b=self.core.repeat_b,
                          bookmarks=bms, media_info=media_info, chapters=chapters)
 
+    def _on_draw_top_bar(self, widget, cr: cairo.Context):
+        if not self.is_fullscreen:
+            return
+        alloc = widget.get_allocation()
+        w, h = alloc.width, alloc.height
+        title = self.core.current_title or "Jonaki"
+        file_ext = ""
+        if self.core.current_file:
+            _, ext = os.path.splitext(self.core.current_file)
+            file_ext = ext
+        self.skin.render_top_bar(cr, w, h, title=title, is_fullscreen=True,
+                                 file_type=file_ext, is_keep_above=getattr(self, "_is_keep_above", False))
+
+    def _on_top_bar_button_press(self, widget, event):
+        self._on_mouse_motion(widget, event)
+        if event.button == 1:
+            hit = self.skin.hit_test_top_bar(int(event.x), int(event.y))
+            if hit and hasattr(hit, "cmd_id"):
+                hit.state = 2  # Pressed
+                self.top_bar.queue_draw()
+                if hit.cmd_id == "CMD_MAIN_MENU":
+                    self.context_menu.popup(event, self.core, recent_files=self.db.get_recent_history(15))
+                elif hit.cmd_id == "ID_ETC_NEXTONTOP":
+                    self._is_keep_above = not getattr(self, "_is_keep_above", False)
+                    self.set_keep_above(self._is_keep_above)
+                    self.osd.show_osd(f"Stay on Top: {'ON' if self._is_keep_above else 'OFF'}")
+                    self.top_bar.queue_draw()
+                else:
+                    self.handle_command(hit.cmd_id)
+                return True
+        elif event.button == 3:
+            self.context_menu.popup(event, self.core, recent_files=self.db.get_recent_history(15))
+            return True
+        return False
+
+    def _on_top_bar_motion(self, widget, event):
+        self._on_mouse_motion(widget, event)
+        x, y = int(event.x), int(event.y)
+        hovered_btn = None
+        for btn in getattr(self.skin, "top_buttons", []):
+            bx, by, bw, bh = btn.rect
+            if bx - 2 <= x <= bx + bw + 2 and by - 2 <= y <= by + bh + 2:
+                btn.state = 1  # Hover
+                hovered_btn = btn
+            else:
+                btn.state = 0
+        if hovered_btn:
+            widget.set_tooltip_text(hovered_btn.tooltip)
+        else:
+            widget.set_tooltip_text(None)
+        self.top_bar.queue_draw()
+        return False
+
+    def _on_top_bar_leave(self, widget, event):
+        for btn in getattr(self.skin, "top_buttons", []):
+            btn.state = 0
+        self.top_bar.queue_draw()
+        return False
+
     # --- Mouse & Interaction Handlers ---
 
     def _set_cursor_visible(self, visible: bool):
@@ -632,7 +724,11 @@ class JonakiMainWindow(Gtk.Window):
         # Unhide controls if they were auto-hidden in fullscreen
         if not self._controls_visible:
             self.skin_area.show()
+            if self.is_fullscreen and hasattr(self, "top_bar") and self.top_bar:
+                self.top_bar.show()
             self._controls_visible = True
+        elif self.is_fullscreen and hasattr(self, "top_bar") and self.top_bar and not self.top_bar.get_visible():
+            self.top_bar.show()
 
         return False
 
@@ -1123,16 +1219,25 @@ class JonakiMainWindow(Gtk.Window):
             return True
         if alt and keyval in (Gdk.KEY_Up, Gdk.KEY_KP_Up):
             pos = self.core.adjust_subtitle_pos(-2)
+            self.sub_mgr.style.pos = pos
+            self.sub_mgr.save_style_config()
             self.osd.show_osd(f"Subtitle Position: {pos}%")
             return True
         if alt and keyval in (Gdk.KEY_Down, Gdk.KEY_KP_Down):
             pos = self.core.adjust_subtitle_pos(+2)
+            self.sub_mgr.style.pos = pos
+            self.sub_mgr.save_style_config()
             self.osd.show_osd(f"Subtitle Position: {pos}%")
             return True
         if alt and keyval in (Gdk.KEY_Home, Gdk.KEY_KP_Home):
             self.core.set_property("sub-pos", "100")
             self.core.sub_pos = 100
+            self.sub_mgr.style.pos = 100
+            self.sub_mgr.save_style_config()
             self.osd.show_osd("Subtitle Position: Default (100%)")
+            return True
+        if alt and not ctrl and keyval in (Gdk.KEY_e, Gdk.KEY_E):
+            self.show_subtitle_style_dialog()
             return True
         if alt and keyval in (Gdk.KEY_t, Gdk.KEY_T):
             self.sub_mgr.translation_enabled = not self.sub_mgr.translation_enabled
@@ -1503,10 +1608,14 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id == "CMD_AUDIO_OUT_NUM_CHANNEL_MESSAGE":
             self.control_box.notebook.set_current_page(0)
             self.control_box.show_all()
-        elif cmd_id == "CMD_TOGGLE_ALWAYS_ON_TOP":
+        elif cmd_id in ("CMD_TOGGLE_ALWAYS_ON_TOP", "ID_ETC_NEXTONTOP"):
             self._is_keep_above = not getattr(self, "_is_keep_above", False)
             self.set_keep_above(self._is_keep_above)
             self.osd.show_osd(f"Stay on Top: {'ON' if self._is_keep_above else 'OFF'}")
+            if hasattr(self, "top_bar") and self.top_bar:
+                self.top_bar.queue_draw()
+        elif cmd_id == "CMD_MIN_WINDOW":
+            self.iconify()
         elif cmd_id == "CMD_CLEAR_PLAYLIST":
             self.playlist.clear()
             self.current_index = -1
@@ -1608,6 +1717,8 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id == "CMD_SUB_TRANSLATE_TOGGLE":
             self.sub_mgr.translation_enabled = not self.sub_mgr.translation_enabled
             self.osd.show_osd(f"AI Subtitle Translation: {'ON' if self.sub_mgr.translation_enabled else 'OFF'}")
+        elif cmd_id == "CMD_SUB_STYLE_SETTINGS":
+            self.show_subtitle_style_dialog()
         elif cmd_id == "CMD_SUB_ONLINE_SEARCH":
             self.show_subtitle_search_dialog()
         elif cmd_id == "CMD_CAPTURE_FRAME":
@@ -1730,21 +1841,29 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd("Audio Sync: 0.0s (Reset)")
         elif cmd_id == "CMD_SUB_POS_UP":
             pos = self.core.adjust_subtitle_pos(-2)
+            self.sub_mgr.style.pos = pos
+            self.sub_mgr.save_style_config()
             self.osd.show_osd(f"Subtitle Position: {pos}%")
         elif cmd_id == "CMD_SUB_POS_DOWN":
             pos = self.core.adjust_subtitle_pos(+2)
+            self.sub_mgr.style.pos = pos
+            self.sub_mgr.save_style_config()
             self.osd.show_osd(f"Subtitle Position: {pos}%")
         elif cmd_id == "CMD_SUB_POS_RESET":
             self.core.set_property("sub-pos", "100")
             self.core.sub_pos = 100
+            self.sub_mgr.style.pos = 100
+            self.sub_mgr.save_style_config()
             self.osd.show_osd("Subtitle Position: Default (100%)")
         elif cmd_id == "CMD_SUB_SIZE_UP":
             sz = self.sub_mgr.increase_font_size(2)
             self.core.set_subtitle_font_size(sz)
+            self.sub_mgr.save_style_config()
             self.osd.show_osd(f"Subtitle Size: {sz} pt")
         elif cmd_id == "CMD_SUB_SIZE_DOWN":
             sz = self.sub_mgr.decrease_font_size(2)
             self.core.set_subtitle_font_size(sz)
+            self.sub_mgr.save_style_config()
             self.osd.show_osd(f"Subtitle Size: {sz} pt")
         elif cmd_id == "CMD_BOOKMARK_ADD":
             if self.core.current_file:
@@ -1797,6 +1916,22 @@ class JonakiMainWindow(Gtk.Window):
                     w = int(h * aspect)
         self.resize(max(320, int(w)), max(240, int(h)))
 
+    def apply_subtitle_style(self) -> None:
+        """Applies configured subtitle styles to the playback engine."""
+        if hasattr(self, "sub_mgr") and hasattr(self, "core"):
+            self.core.apply_subtitle_style(self.sub_mgr.style)
+
+    def show_subtitle_style_dialog(self) -> None:
+        """Opens the PotPlayer-like Subtitle Style Settings dialog."""
+        def _on_style_updated(new_style):
+            self.sub_mgr.style = new_style
+            self.sub_mgr.save_style_config()
+            self.apply_subtitle_style()
+            self.osd.show_osd("Subtitle Style Updated")
+
+        dialog = SubtitleStyleDialog(self, self.sub_mgr.style, _on_style_updated)
+        dialog.show_all()
+
     def show_media_info_dialog(self) -> None:
         info = self.core.get_media_detailed_info()
         self.media_info_dialog.update_info(info)
@@ -1826,12 +1961,18 @@ class JonakiMainWindow(Gtk.Window):
         if self.is_fullscreen:
             self.unfullscreen()
             self.is_fullscreen = False
+            if hasattr(self, "top_bar") and self.top_bar:
+                self.top_bar.hide()
             self.skin_area.show()
             self._controls_visible = True
             self._set_cursor_visible(True)
         else:
             self.fullscreen()
             self.is_fullscreen = True
+            self.skin_area.show()
+            if hasattr(self, "top_bar") and self.top_bar:
+                self.top_bar.show()
+            self._controls_visible = True
             self._last_mouse_move_time = time.time()
             self._set_cursor_visible(True)
 
@@ -1840,10 +1981,16 @@ class JonakiMainWindow(Gtk.Window):
         if self.is_fullscreen != is_fs:
             self.is_fullscreen = is_fs
             if not self.is_fullscreen:
+                if hasattr(self, "top_bar") and self.top_bar:
+                    self.top_bar.hide()
                 self.skin_area.show()
                 self._controls_visible = True
                 self._set_cursor_visible(True)
             else:
+                self.skin_area.show()
+                if hasattr(self, "top_bar") and self.top_bar:
+                    self.top_bar.show()
+                self._controls_visible = True
                 self._last_mouse_move_time = time.time()
                 self._set_cursor_visible(True)
         return False
@@ -1861,6 +2008,9 @@ class JonakiMainWindow(Gtk.Window):
 
     def _on_core_state_change(self, state: str):
         self.skin_area.queue_draw()
+        if hasattr(self, "power_inhibitor") and self.power_inhibitor:
+            is_playing = (state == PlaybackState.PLAYING)
+            self.power_inhibitor.update_state(is_playing)
         if hasattr(self, "mpris") and self.mpris:
             self.mpris.notify_playback_changed()
 
@@ -2338,6 +2488,8 @@ class JonakiMainWindow(Gtk.Window):
             self._click_timer_id = None
         if hasattr(self, "mpris") and self.mpris:
             self.mpris.stop()
+        if hasattr(self, "power_inhibitor") and self.power_inhibitor:
+            self.power_inhibitor.uninhibit()
         if hasattr(self, "torrent_manager") and self.torrent_manager:
             self.torrent_manager.stop_session()
         self._save_current_position()

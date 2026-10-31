@@ -9,6 +9,9 @@ import time
 from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk
 from ui.main_window import JonakiMainWindow
 from core.engine import PlaybackState
 
@@ -88,8 +91,9 @@ class TestCursorAndControls(unittest.TestCase):
         # In fullscreen after 2.5s inactivity, controls must be hidden
         self.assertFalse(self.win._controls_visible)
         self.assertFalse(self.win.skin_area.get_visible())
+        self.assertFalse(self.win.top_bar.get_visible())
 
-        # Mouse motion should restore control bar visibility
+        # Mouse motion should restore control bar and top bar visibility
         mock_event = MagicMock()
         mock_event.x = 250
         mock_event.y = 300
@@ -99,6 +103,35 @@ class TestCursorAndControls(unittest.TestCase):
         self.win._on_mouse_motion(self.win.video_area, mock_event)
         self.assertTrue(self.win._controls_visible)
         self.assertTrue(self.win.skin_area.get_visible())
+        self.assertTrue(self.win.top_bar.get_visible())
+
+    def test_fullscreen_overlay_does_not_resize_video(self):
+        # In fullscreen, show/hide of skin_area and top_bar should not resize video_area
+        self.win.set_default_size(1000, 700)
+        self.win.show_all()
+        self.win.is_fullscreen = True
+        self.win.skin_area.show()
+        self.win.top_bar.show()
+
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+
+        w_shown = self.win.video_area.get_allocation().width
+        h_shown = self.win.video_area.get_allocation().height
+
+        # Hide both bars as in auto-hide
+        self.win.skin_area.hide()
+        self.win.top_bar.hide()
+
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+
+        w_hidden = self.win.video_area.get_allocation().width
+        h_hidden = self.win.video_area.get_allocation().height
+
+        # Video dimensions should be completely identical (no layout resize)
+        self.assertEqual(w_shown, w_hidden)
+        self.assertEqual(h_shown, h_hidden)
 
     def test_cursor_remains_visible_when_not_playing(self):
         self.win.core.state = PlaybackState.PAUSED
