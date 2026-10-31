@@ -1,5 +1,9 @@
 # Pixel Shaders & Motion Interpolation Specification
 
+> [!NOTE]
+> **Status: Reverse-Engineering Reference & Future Roadmap**  
+> The core Linux playback engine currently supports active video shaders (Sharpen, Adaptive Sharpen, Denoise) through direct GLSL hook injection. The complete 34-shader library and VapourSynth/MVTools frame interpolation scripts documented below represent reverse-engineered Windows artifacts cataloged for future Linux implementation.
+
 This document details the video post-processing pixel shader pipeline and VapourSynth/AviSynth motion interpolation engine, reverse-engineered from `extracted_jonaki/PxShader/`, `VapourSynth/`, and `AviSynth/`.
 
 ---

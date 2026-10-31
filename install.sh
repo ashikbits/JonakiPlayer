@@ -19,14 +19,17 @@ fi
 if ! python3 -c "import cairo" >/dev/null 2>&1; then
     MISSING_DEPS+=("python3-cairo")
 fi
+if ! python3 -c "import ctypes.util; assert ctypes.util.find_library('mpv') is not None" >/dev/null 2>&1; then
+    MISSING_DEPS+=("libmpv (libmpv2 / libmpv-dev / mpv-libs)")
+fi
 if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
     echo "[!] Notice: The following dependencies were not detected in current Python environment:"
     for dep in "${MISSING_DEPS[@]}"; do
         echo "    - $dep"
     done
-    echo "    On Debian/Ubuntu: sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 ffmpeg"
-    echo "    On Fedora:        sudo dnf install python3-gobject gtk3 ffmpeg"
-    echo "    On Arch:          sudo pacman -S python-gobject gtk3 ffmpeg"
+    echo "    On Debian/Ubuntu: sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 ffmpeg libmpv2 libmpv-dev"
+    echo "    On Fedora:        sudo dnf install python3-gobject gtk3 ffmpeg mpv-libs"
+    echo "    On Arch:          sudo pacman -S python-gobject gtk3 ffmpeg mpv"
     echo ""
 fi
 

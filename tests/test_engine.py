@@ -224,8 +224,8 @@ class TestJonakiCore(unittest.TestCase):
     def test_equalizer_bands_clamped(self):
         self.core.set_equalizer_band(0, 20.0)
         self.assertEqual(self.core.equalizer_bands[0], 12.0)
-        self.core.set_equalizer_band(0, -20.0)
-        self.assertEqual(self.core.equalizer_bands[0], -12.0)
+        self.core.set_equalizer_band(0, -30.0)
+        self.assertEqual(self.core.equalizer_bands[0], -24.0)
 
     def test_hwdec_toggle(self):
         initial = self.core.hwdec_active
@@ -313,16 +313,16 @@ class TestJonakiCore(unittest.TestCase):
         self.core.play_pause()
         self.assertEqual(self.core.state, PlaybackState.PAUSED)
 
-        # Seeking operations
+        # Seeking operations (verifying exact seeks enforced)
         with unittest.mock.patch.object(self.core, "command") as mock_cmd:
             self.core.seek_relative(10.0)
-            mock_cmd.assert_called_with("seek 10.0 relative")
+            mock_cmd.assert_called_with("seek 10.0 relative+exact")
 
             self.core.seek_absolute(120.0)
-            mock_cmd.assert_called_with("seek 120.0 absolute")
+            mock_cmd.assert_called_with("seek 120.0 absolute+exact")
 
             self.core.seek_percent(50.0)
-            mock_cmd.assert_called_with("seek 50.0 absolute-percent")
+            mock_cmd.assert_called_with("seek 50.0 absolute-percent+exact")
 
             self.core.cycle_subtitle_track()
             mock_cmd.assert_called_with("cycle sub")

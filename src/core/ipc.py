@@ -85,6 +85,7 @@ class IPCServer:
         self._is_running = False
         self._owns_socket = False
         self._thread: Optional[threading.Thread] = None
+        self._concurrency_semaphore = threading.BoundedSemaphore(10)
 
     def start(self) -> bool:
         # Acquire advisory file lock to eliminate TOCTOU races between concurrent instances
@@ -119,7 +120,11 @@ class IPCServer:
 
         try:
             self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self._server_socket.bind(self.socket_path)
+            old_umask = os.umask(0o077)
+            try:
+                self._server_socket.bind(self.socket_path)
+            finally:
+                os.umask(old_umask)
             try:
                 os.chmod(self.socket_path, 0o600)
             except Exception:
@@ -149,19 +154,33 @@ class IPCServer:
             except Exception:
                 pass
             self._lock_file = None
-        if os.path.exists(self.lock_path):
-            try:
-                os.unlink(self.lock_path)
-            except OSError:
-                pass
+        # Note: Do not unlink self.lock_path! Retaining the lock file on disk preserves
+        # advisory POSIX flock mutual exclusion across concurrent and subsequent processes.
 
     def _listen_loop(self) -> None:
         while self._is_running and self._server_socket:
             try:
                 client_sock, _ = self._server_socket.accept()
-                threading.Thread(target=self._handle_client, args=(client_sock,), daemon=True).start()
+                if not self._concurrency_semaphore.acquire(blocking=False):
+                    try:
+                        _send_msg(client_sock, json.dumps({"status": "error", "message": "Server busy"}).encode("utf-8"))
+                        client_sock.close()
+                    except Exception:
+                        pass
+                    continue
+                threading.Thread(
+                    target=self._guarded_handle_client,
+                    args=(client_sock,),
+                    daemon=True
+                ).start()
             except OSError:
                 break
+
+    def _guarded_handle_client(self, client_sock: socket.socket) -> None:
+        try:
+            self._handle_client(client_sock)
+        finally:
+            self._concurrency_semaphore.release()
 
     def _handle_client(self, client_sock: socket.socket) -> None:
         client_sock.settimeout(5.0)

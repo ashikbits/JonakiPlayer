@@ -22,6 +22,7 @@ import tempfile
 import shutil
 import stat
 import subprocess
+import fcntl
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -298,10 +299,11 @@ class TestIPCMechanismAndSecurity(unittest.TestCase):
 
     def test_TC_IPC_04_advisory_lock_cleanup_on_stop(self):
         """
-        TC-IPC-04: Verify lockfile and socket are cleanly unlinked when server stops.
+        TC-IPC-04: Verify lock is released and socket is cleanly unlinked when server stops.
         Preconditions: IPCServer is running.
         Steps: Call server.stop().
-        Expected: Socket file and .lock file are unlinked from disk.
+        Expected: Socket file is unlinked from disk, advisory lock is released so other instances
+        can acquire it, and .lock file is retained on disk to preserve POSIX flock semantics.
         """
         server = IPCServer(lambda msg: {}, socket_path=self.socket_path)
         server.start()
@@ -310,7 +312,12 @@ class TestIPCMechanismAndSecurity(unittest.TestCase):
 
         server.stop()
         self.assertFalse(os.path.exists(self.socket_path))
-        self.assertFalse(os.path.exists(self.socket_path + ".lock"))
+        self.assertTrue(os.path.exists(self.socket_path + ".lock"))
+
+        # Verify another process can immediately acquire the advisory lock
+        with open(self.socket_path + ".lock", "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_UN)
 
     def test_TC_IPC_05_payload_fuzzing_oversized_message(self):
         """

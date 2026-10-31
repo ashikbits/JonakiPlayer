@@ -8,10 +8,25 @@ Supports /filedlg, /seek=, /sub=, /aud=, /user_agent=, /new, /current, and stdin
 
 import os
 import sys
+import shutil
 
 def ensure_x11_backend() -> None:
     if os.environ.get("JONAKI_REEXEC") == "1":
         return
+
+    # Check display server environment
+    wayland_display = os.environ.get("WAYLAND_DISPLAY")
+    x11_display = os.environ.get("DISPLAY")
+
+    if wayland_display and not x11_display:
+        if not shutil.which("Xwayland"):
+            print(
+                "[Jonaki] Warning: Pure Wayland session detected without DISPLAY or Xwayland.\n"
+                "JonakiPlayer embeds libmpv via X11 Window IDs (wid) and requires X11 or XWayland.\n"
+                "Please ensure XWayland is installed and enabled in your Wayland compositor.",
+                file=sys.stderr
+            )
+
     # Guarantee X11 surface embedding under Wayland / XWayland
     needs_reexec = False
     if os.environ.get("GDK_BACKEND") != "x11":

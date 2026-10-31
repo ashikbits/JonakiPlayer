@@ -5,6 +5,7 @@ Album tabs, search filter, shuffle, sorting, and drag-and-drop.
 
 import os
 import random
+import uuid
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib
@@ -32,8 +33,8 @@ class PlaylistWindow(Gtk.Window):
         self.search_entry.connect("search-changed", self._on_search_changed)
         vbox.pack_start(self.search_entry, False, False, 0)
 
-        # TreeView List: (Index, Title, Duration, FilePath)
-        self.list_store = Gtk.ListStore(int, str, str, str)
+        # TreeView List: (Index, Title, Duration, FilePath, ItemID)
+        self.list_store = Gtk.ListStore(int, str, str, str, str)
         self.tree_view = Gtk.TreeView(model=self.list_store)
         self.tree_view.set_headers_visible(True)
         self.tree_view.set_reorderable(True)
@@ -109,22 +110,22 @@ class PlaylistWindow(Gtk.Window):
         if self.search_entry.get_text().strip():
             return
         new_playlist = []
-        current_path = None
+        current_id = None
         cur_idx = getattr(self.player, "current_index", -1)
         if 0 <= cur_idx < len(self.player.playlist):
-            current_path = self.player.playlist[cur_idx]["path"]
+            current_id = self.player.playlist[cur_idx].get("id")
 
-        path_map = {item["path"]: item for item in self.player.playlist}
+        id_map = {item.get("id"): item for item in self.player.playlist if "id" in item}
         for row in self.list_store:
-            fp = row[3]
-            if fp in path_map:
-                new_playlist.append(path_map[fp])
+            row_id = row[4]
+            if row_id in id_map:
+                new_playlist.append(id_map[row_id])
 
         if len(new_playlist) == len(self.player.playlist):
             self.player.playlist = new_playlist
-            if current_path:
+            if current_id:
                 for i, it in enumerate(self.player.playlist):
-                    if it["path"] == current_path:
+                    if it.get("id") == current_id:
                         self.player.current_index = i
                         break
             try:
@@ -208,7 +209,8 @@ class PlaylistWindow(Gtk.Window):
             dur = item.get("duration", 0.0)
             total_sec += dur
             dur_str = self._format_duration(dur)
-            row_iter = self.list_store.append([i + 1, title, dur_str, item_path])
+            item_id = item.setdefault("id", uuid.uuid4().hex)
+            row_iter = self.list_store.append([i + 1, title, dur_str, item_path, item_id])
             if is_active:
                 active_iter = row_iter
 
@@ -287,7 +289,8 @@ class PlaylistWindow(Gtk.Window):
             dur = item.get("duration", 0.0)
             total_sec += dur
             dur_str = self._format_duration(dur)
-            row_iter = self.list_store.append([orig_idx + 1, title, dur_str, item_path])
+            item_id = item.setdefault("id", uuid.uuid4().hex)
+            row_iter = self.list_store.append([orig_idx + 1, title, dur_str, item_path, item_id])
             if is_active:
                 active_iter = row_iter
         self.lbl_summary.set_text(f"{len(filtered)} items | {self._format_duration(total_sec)}")

@@ -35,6 +35,38 @@ def validate_magnet_uri(uri: str) -> bool:
     return "xt=urn:btih:" in uri_clean or "xt=urn:btmh:" in uri_clean
 
 
+def sanitize_torrent_path(base_dir: str, untrusted_rel_path: str) -> str:
+    """
+    Validates and normalizes an untrusted relative path against a base download directory.
+    Guarantees the target path is strictly contained within base_dir.
+    Rejects path traversal, leading slashes, and escapes.
+    """
+    if not untrusted_rel_path:
+        raise ValueError("Empty relative path in torrent metadata")
+
+    # Reject leading slashes, backslashes, drive letters, and absolute paths immediately
+    if (
+        untrusted_rel_path.startswith("/")
+        or untrusted_rel_path.startswith("\\")
+        or os.path.isabs(untrusted_rel_path)
+    ):
+        raise ValueError(f"Absolute path escape in torrent metadata: {untrusted_rel_path}")
+    if len(untrusted_rel_path) > 1 and untrusted_rel_path[1] == ":":
+        raise ValueError(f"Drive letter escape in torrent metadata: {untrusted_rel_path}")
+
+    base_abs = os.path.realpath(os.path.abspath(base_dir))
+    target_abs = os.path.realpath(os.path.abspath(os.path.join(base_abs, untrusted_rel_path)))
+
+    try:
+        common = os.path.commonpath([base_abs, target_abs])
+        if common != base_abs or target_abs == base_abs:
+            raise ValueError(f"Path traversal detected in torrent metadata: {untrusted_rel_path}")
+    except ValueError as e:
+        raise ValueError(f"Path traversal detected in torrent metadata: {untrusted_rel_path}") from e
+
+    return target_abs
+
+
 class TorrentEngine:
     """
     Manages a libtorrent session, active torrent handle, alert worker,
@@ -323,7 +355,7 @@ class TorrentEngine:
                 pass
 
     def get_selected_file_path(self) -> Optional[str]:
-        """Returns the absolute filesystem path of the currently selected file."""
+        """Returns the sanitized absolute filesystem path of the currently selected file."""
         with self._lock:
             if (
                 not self.handle
@@ -333,7 +365,11 @@ class TorrentEngine:
                 return None
             save_path = self.handle.status().save_path
             rel_path = self._ti_files(self.torrent_info).file_path(self.selected_file_index)
-            return os.path.join(save_path, rel_path)
+            try:
+                return sanitize_torrent_path(save_path, rel_path)
+            except ValueError as e:
+                logger.error("Blocked unsafe torrent file path: %s", e)
+                return None
 
     def get_selected_file_size(self) -> int:
         """Returns the size in bytes of the selected file."""

@@ -3,9 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-!lib/*.so*
-!lib/*
-!src/gi/*.so
 
 # Virtual environments
 venv/
@@ -54,3 +51,4 @@ extracted_*/
 *~
 .DS_Store
 Thumbs.db
+.kilo/

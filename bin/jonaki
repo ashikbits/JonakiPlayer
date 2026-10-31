@@ -1,6 +1,6 @@
 #!/bin/bash
 # Jonaki for Linux - Executable Launcher
-# Native packed libmpv multimedia engine supporting pure Wayland and X11 out of the box.
+# High-performance libmpv multimedia player for Linux (X11 & XWayland).
 
 REAL_SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$REAL_SOURCE")" && pwd)"
@@ -9,6 +9,15 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "3")"
 export PYTHONPATH="$PROJECT_DIR/src:$HOME/.local/lib/python${PY_VER}/site-packages:$PYTHONPATH"
 export LD_LIBRARY_PATH="$PROJECT_DIR/lib:$LD_LIBRARY_PATH"
+
+# Display Server & XWayland Integration
+if [ -n "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
+    if ! command -v Xwayland >/dev/null 2>&1; then
+        echo "[Jonaki] Notice: Running on Wayland without DISPLAY or Xwayland." >&2
+        echo "JonakiPlayer embeds libmpv via X11 Window IDs (wid) and requires an X11 server or XWayland." >&2
+    fi
+fi
+
 export GDK_BACKEND=x11
 unset WAYLAND_DISPLAY
 

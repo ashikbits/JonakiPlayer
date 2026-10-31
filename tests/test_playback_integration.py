@@ -459,9 +459,9 @@ class TestAudioSubsystem(BasePlaybackTest):
         self.core.set_equalizer_band(1, 20.0)
         self.assertEqual(self.core.equalizer_bands[1], 12.0)
 
-        # Clamping at -12 dB
-        self.core.set_equalizer_band(2, -25.0)
-        self.assertEqual(self.core.equalizer_bands[2], -12.0)
+        # Clamping at -24 dB
+        self.core.set_equalizer_band(2, -30.0)
+        self.assertEqual(self.core.equalizer_bands[2], -24.0)
 
     def test_tc_aud_04_equalizer_filter_graph(self):
         """TC-AUD-04: Equalizer correctly builds mpv af filter string."""

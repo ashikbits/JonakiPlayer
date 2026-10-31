@@ -13,12 +13,26 @@ import sys
 import time
 import math
 import ctypes
+import ctypes.util
+import threading
 import json
 from typing import Callable, Optional, Dict, Any, List
 
 import gi
 gi.require_version('GLib', '2.0')
 from gi.repository import GLib
+
+
+class MpvEvent(ctypes.Structure):
+    _fields_ = [
+        ("event_id", ctypes.c_int),
+        ("error", ctypes.c_int),
+        ("reply_userdata", ctypes.c_uint64),
+        ("data", ctypes.c_void_p)
+    ]
+
+
+WAKEUP_CB_TYPE = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 
 
 def set_c_numeric_locale() -> None:
@@ -107,7 +121,7 @@ class JonakiCore:
         self.hue: float = 0.0
         self.gamma: float = 0.0
 
-        # Equalizer 10 octave bands (-12 dB to +12 dB)
+        # Equalizer 10 octave bands (-24 dB to +12 dB)
         self.equalizer_bands: List[float] = [0.0] * 10
 
         # A-B Repeat Loop
@@ -120,30 +134,63 @@ class JonakiCore:
         self.on_file_end: Optional[Callable[[], None]] = None
         self.on_audio_filter_sync: Optional[Callable[[], None]] = None
 
-        # Find and load bundled libmpv
-        self.lib = self._load_bundled_libmpv()
+        # Thread synchronization and lifecycle state
+        self._lock: threading.RLock = threading.RLock()
+        self._is_running: bool = False
+        self._wakeup_cb_ref = None
+
+        # Find and load system libmpv
+        self.lib = self._load_libmpv()
         self._init_c_prototypes()
 
         self.handle: Optional[ctypes.c_void_p] = None
         self._timer_id: Optional[int] = None
         self.start_engine()
 
-    def _load_bundled_libmpv(self) -> ctypes.CDLL:
-        base_dir = os.path.dirname(__file__)
-        candidates = [
-            os.path.abspath(os.path.join(base_dir, "..", "..", "lib", "libmpv.so")),
-            os.path.abspath(os.path.join(base_dir, "..", "..", "lib", "libmpv.so.2")),
-            os.path.abspath(os.path.join(os.getcwd(), "lib", "libmpv.so")),
-            "libmpv.so.2",
-            "libmpv.so"
+    def _load_libmpv(self) -> ctypes.CDLL:
+        """
+        Discovers and dynamically links against system libmpv.
+        Checks ctypes.util.find_library, standard sonames, and system library paths.
+        """
+        # 1. Standard find_library lookup
+        lib_name = ctypes.util.find_library("mpv")
+        if lib_name:
+            try:
+                return ctypes.CDLL(lib_name)
+            except OSError:
+                pass
+
+        # 2. Common Linux sonames
+        for soname in ["libmpv.so.2", "libmpv.so.1", "libmpv.so"]:
+            try:
+                return ctypes.CDLL(soname)
+            except OSError:
+                continue
+
+        # 3. Known distribution library paths
+        search_paths = [
+            "/usr/lib/x86_64-linux-gnu/libmpv.so.2",
+            "/usr/lib64/libmpv.so.2",
+            "/usr/lib/libmpv.so.2",
+            "/usr/local/lib/libmpv.so.2",
+            "/usr/lib/x86_64-linux-gnu/libmpv.so.1",
+            "/usr/lib64/libmpv.so.1",
+            "/usr/lib/libmpv.so.1",
         ]
-        for path in candidates:
-            if os.path.exists(path) or not os.path.isabs(path):
+        for p in search_paths:
+            if os.path.exists(p):
                 try:
-                    return ctypes.CDLL(path)
-                except Exception:
+                    return ctypes.CDLL(p)
+                except OSError:
                     continue
-        raise RuntimeError("Could not find or load bundled libmpv.so from project lib/ directory.")
+
+        raise RuntimeError(
+            "libmpv shared library could not be found or loaded on this system.\n"
+            "Please install libmpv using your distribution's package manager:\n"
+            "  Debian/Ubuntu: sudo apt install libmpv2 libmpv-dev\n"
+            "  Fedora:        sudo dnf install mpv-libs\n"
+            "  Arch Linux:    sudo pacman -S mpv\n"
+        )
 
     def _init_c_prototypes(self) -> None:
         self.lib.mpv_create.restype = ctypes.c_void_p
@@ -162,135 +209,229 @@ class JonakiCore:
         self.lib.mpv_get_property_string.restype = ctypes.c_void_p
         self.lib.mpv_get_property_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
         self.lib.mpv_free.argtypes = [ctypes.c_void_p]
+        self.lib.mpv_set_wakeup_callback.argtypes = [ctypes.c_void_p, WAKEUP_CB_TYPE, ctypes.c_void_p]
+        self.lib.mpv_set_wakeup_callback.restype = None
+        self.lib.mpv_wait_event.argtypes = [ctypes.c_void_p, ctypes.c_double]
+        self.lib.mpv_wait_event.restype = ctypes.POINTER(MpvEvent)
+
+    def _on_mpv_wakeup(self, ctx_ptr: Optional[ctypes.c_void_p] = None) -> None:
+        """
+        C callback invoked by libmpv from arbitrary background threads when events are queued.
+        Dispatches event draining to the GLib main loop.
+        """
+        try:
+            GLib.idle_add(self._drain_mpv_events)
+        except Exception:
+            pass
+
+    def _drain_mpv_events(self) -> bool:
+        """
+        Drains all pending events non-blockingly from libmpv on the GTK main thread.
+        """
+        with self._lock:
+            if not self.handle or not self._is_running:
+                return False
+
+            while self.handle and self._is_running:
+                try:
+                    event_ptr = self.lib.mpv_wait_event(self.handle, 0.0)
+                except Exception:
+                    break
+                if not event_ptr:
+                    break
+                event = event_ptr.contents
+                event_id = event.event_id
+                if event_id == 0:  # MPV_EVENT_NONE
+                    break
+                self._handle_mpv_event(event_id, event.error)
+        return False
+
+    def _handle_mpv_event(self, event_id: int, error_code: int) -> None:
+        """
+        Handles dispatched libmpv events. Runs on GTK main loop context.
+        """
+        if event_id == 8:  # MPV_EVENT_FILE_LOADED
+            if not self._metadata_probed:
+                self._probe_media_metadata()
+            if self.on_audio_filter_sync:
+                try:
+                    self.on_audio_filter_sync()
+                except Exception:
+                    pass
+        elif event_id == 7:  # MPV_EVENT_END_FILE
+            if self.state in (PlaybackState.PLAYING, PlaybackState.PAUSED) and self.current_file:
+                self.state = PlaybackState.STOPPED
+                if self.on_state_change:
+                    try:
+                        self.on_state_change(self.state)
+                    except Exception:
+                        pass
+                if self.on_file_end:
+                    try:
+                        self.on_file_end()
+                    except Exception:
+                        pass
+        elif event_id == 12:  # MPV_EVENT_PAUSE
+            if self.state == PlaybackState.PLAYING:
+                self.state = PlaybackState.PAUSED
+                if self.on_state_change:
+                    try:
+                        self.on_state_change(self.state)
+                    except Exception:
+                        pass
+        elif event_id == 13:  # MPV_EVENT_UNPAUSE
+            if self.state == PlaybackState.PAUSED:
+                self.state = PlaybackState.PLAYING
+                if self.on_state_change:
+                    try:
+                        self.on_state_change(self.state)
+                    except Exception:
+                        pass
 
     def start_engine(self) -> bool:
-        if self.handle:
+        with self._lock:
+            if self.handle:
+                return True
+            set_c_numeric_locale()
+            self.handle = self.lib.mpv_create()
+            if not self.handle:
+                return False
+
+            self._is_running = True
+
+            # Register wakeup callback with retained CFUNCTYPE reference
+            self._wakeup_cb_ref = WAKEUP_CB_TYPE(self._on_mpv_wakeup)
+            self.lib.mpv_set_wakeup_callback(self.handle, self._wakeup_cb_ref, None)
+
+            # Configure initial hardware options before mpv_initialize
+            if self.wid is not None:
+                self.lib.mpv_set_option_string(self.handle, b"wid", str(self.wid).encode("utf-8"))
+                self.lib.mpv_set_option_string(self.handle, b"vo", b"gpu")
+            else:
+                self.lib.mpv_set_option_string(self.handle, b"vo", b"null")
+
+            # Never let mpv open detached/standalone window
+            self.lib.mpv_set_option_string(self.handle, b"force-window", b"no")
+            self.lib.mpv_set_option_string(self.handle, b"x11-bypass-compositor", b"no")
+            has_nvidia = os.path.exists("/dev/nvidia0") or os.path.exists("/dev/nvidiactl")
+            self._preferred_hwdec = "nvdec,auto-safe" if has_nvidia else "vaapi"
+            hwdec_val = self._preferred_hwdec.encode("utf-8")
+            self.lib.mpv_set_option_string(self.handle, b"hwdec", hwdec_val)
+            self.hwdec_active = self._preferred_hwdec
+            self.lib.mpv_set_option_string(self.handle, b"msg-level", b"all=warn")
+            self.lib.mpv_set_option_string(self.handle, b"keep-open", b"yes")
+            self.lib.mpv_set_option_string(self.handle, b"ytdl", b"yes")
+            self.lib.mpv_set_option_string(self.handle, b"ytdl-format", b"bestvideo+bestaudio/best")
+            self.lib.mpv_set_option_string(self.handle, b"input-default-bindings", b"no")
+            self.lib.mpv_set_option_string(self.handle, b"input-vo-keyboard", b"no")
+            self.lib.mpv_set_option_string(self.handle, b"cursor-autohide", b"no")
+            self.lib.mpv_set_option_string(self.handle, b"input-cursor", b"no")
+            self.lib.mpv_set_option_string(self.handle, b"sub-auto", b"fuzzy")
+            self.lib.mpv_set_option_string(self.handle, b"sub-font-size", str(self.sub_size).encode("utf-8"))
+            # Audio output routing: prefer pulse (pipewire-pulse) then pipewire then alsa
+            self.lib.mpv_set_option_string(self.handle, b"ao", b"pulse,pipewire,alsa")
+            self.lib.mpv_set_option_string(self.handle, b"audio-client-name", b"Jonaki")
+            self.lib.mpv_set_option_string(self.handle, b"title", b"Jonaki")
+
+            # Native hardware OSD styling (top-left notifications)
+            self.lib.mpv_set_option_string(self.handle, b"osd-font", b"sans-serif")
+            self.lib.mpv_set_option_string(self.handle, b"osd-font-size", b"22")
+            self.lib.mpv_set_option_string(self.handle, b"osd-color", b"#FFFFFF")
+            self.lib.mpv_set_option_string(self.handle, b"osd-border-color", b"#000000")
+            self.lib.mpv_set_option_string(self.handle, b"osd-border-size", b"2.0")
+            self.lib.mpv_set_option_string(self.handle, b"osd-align-x", b"left")
+            self.lib.mpv_set_option_string(self.handle, b"osd-align-y", b"top")
+            self.lib.mpv_set_option_string(self.handle, b"osd-margin-x", b"20")
+            self.lib.mpv_set_option_string(self.handle, b"osd-margin-y", b"20")
+
+            ret = self.lib.mpv_initialize(self.handle)
+            if ret < 0:
+                try:
+                    self.lib.mpv_terminate_destroy(self.handle)
+                except Exception:
+                    pass
+                self.handle = None
+                self._is_running = False
+                return False
+
+            # Set initial volume strictly to 100%
+            self.set_property("volume", "100")
+
+            # Periodic tick for seekbar position synchronization
+            if not self._timer_id:
+                self._timer_id = GLib.timeout_add(100, self._query_time_tick)
+
             return True
-        set_c_numeric_locale()
-        self.handle = self.lib.mpv_create()
-        if not self.handle:
-            return False
-
-        # Configure initial hardware options before mpv_initialize
-        if self.wid is not None:
-            self.lib.mpv_set_option_string(self.handle, b"wid", str(self.wid).encode("utf-8"))
-            self.lib.mpv_set_option_string(self.handle, b"vo", b"gpu")
-        else:
-            self.lib.mpv_set_option_string(self.handle, b"vo", b"null")
-
-        # Never let mpv open detached/standalone window
-        self.lib.mpv_set_option_string(self.handle, b"force-window", b"no")
-        self.lib.mpv_set_option_string(self.handle, b"x11-bypass-compositor", b"no")
-        has_nvidia = os.path.exists("/dev/nvidia0") or os.path.exists("/dev/nvidiactl")
-        self._preferred_hwdec = "nvdec,auto-safe" if has_nvidia else "vaapi"
-        hwdec_val = self._preferred_hwdec.encode("utf-8")
-        self.lib.mpv_set_option_string(self.handle, b"hwdec", hwdec_val)
-        self.hwdec_active = self._preferred_hwdec
-        self.lib.mpv_set_option_string(self.handle, b"msg-level", b"all=warn")
-        self.lib.mpv_set_option_string(self.handle, b"keep-open", b"yes")
-        self.lib.mpv_set_option_string(self.handle, b"ytdl", b"yes")
-        self.lib.mpv_set_option_string(self.handle, b"ytdl-format", b"bestvideo+bestaudio/best")
-        self.lib.mpv_set_option_string(self.handle, b"input-default-bindings", b"no")
-        self.lib.mpv_set_option_string(self.handle, b"input-vo-keyboard", b"no")
-        self.lib.mpv_set_option_string(self.handle, b"cursor-autohide", b"no")
-        self.lib.mpv_set_option_string(self.handle, b"input-cursor", b"no")
-        self.lib.mpv_set_option_string(self.handle, b"sub-auto", b"fuzzy")
-        self.lib.mpv_set_option_string(self.handle, b"sub-font-size", str(self.sub_size).encode("utf-8"))
-        # Audio output routing: prefer pulse (pipewire-pulse) then pipewire then alsa
-        # This guarantees proper application naming, icon, and desktop entry propagation to system soundbars
-        self.lib.mpv_set_option_string(self.handle, b"ao", b"pulse,pipewire,alsa")
-        self.lib.mpv_set_option_string(self.handle, b"audio-client-name", b"Jonaki")
-        self.lib.mpv_set_option_string(self.handle, b"title", b"Jonaki")
-
-        # Native hardware OSD styling (top-left notifications)
-        self.lib.mpv_set_option_string(self.handle, b"osd-font", b"sans-serif")
-        self.lib.mpv_set_option_string(self.handle, b"osd-font-size", b"22")
-        self.lib.mpv_set_option_string(self.handle, b"osd-color", b"#FFFFFF")
-        self.lib.mpv_set_option_string(self.handle, b"osd-border-color", b"#000000")
-        self.lib.mpv_set_option_string(self.handle, b"osd-border-size", b"2.0")
-        self.lib.mpv_set_option_string(self.handle, b"osd-align-x", b"left")
-        self.lib.mpv_set_option_string(self.handle, b"osd-align-y", b"top")
-        self.lib.mpv_set_option_string(self.handle, b"osd-margin-x", b"20")
-        self.lib.mpv_set_option_string(self.handle, b"osd-margin-y", b"20")
-
-        ret = self.lib.mpv_initialize(self.handle)
-        if ret < 0:
-            try:
-                self.lib.mpv_terminate_destroy(self.handle)
-            except Exception:
-                pass
-            self.handle = None
-            return False
-
-        # Set initial volume strictly to 100%
-        self.set_property("volume", "100")
-
-        # Start periodic tick for playback progress and metadata sync (100ms)
-        if not self._timer_id:
-            self._timer_id = GLib.timeout_add(100, self._query_time_tick)
-
-        return True
 
     def stop_engine(self) -> None:
-        if self._timer_id:
-            tid = self._timer_id
-            self._timer_id = None
-            try:
-                GLib.source_remove(tid)
-            except Exception:
-                pass
-        if self.handle:
+        with self._lock:
+            self._is_running = False
+            if self._timer_id:
+                tid = self._timer_id
+                self._timer_id = None
+                try:
+                    GLib.source_remove(tid)
+                except Exception:
+                    pass
             h = self.handle
             self.handle = None
+            self.state = PlaybackState.STOPPED
+
+        # Terminate outside lock boundary to prevent deadlocks with internal threads
+        if h:
             try:
                 self.lib.mpv_terminate_destroy(h)
             except Exception:
                 pass
-            self.state = PlaybackState.STOPPED
 
     def set_wid(self, wid: int) -> None:
-        self.wid = wid
-        if self.handle:
-            self.set_property("wid", str(wid))
-            self.set_property("vo", "gpu")
-            self.set_property("cursor-autohide", "no")
-            self.set_property("input-cursor", "no")
-            if getattr(self, "_pending_file", None):
-                pending = self._pending_file
-                self._pending_file = None
-                if isinstance(pending, tuple):
-                    self.load_file(*pending)
+        with self._lock:
+            self.wid = wid
+            if self.handle:
+                self.set_property("wid", str(wid))
+                self.set_property("vo", "gpu")
+                self.set_property("cursor-autohide", "no")
+                self.set_property("input-cursor", "no")
+                if getattr(self, "_pending_file", None):
+                    pending = self._pending_file
+                    self._pending_file = None
+                    if isinstance(pending, tuple):
+                        self.load_file(*pending)
 
     def command_args(self, *args: str) -> int:
-        if not self.handle:
-            return -1
-        arr_type = ctypes.c_char_p * (len(args) + 1)
-        c_args = arr_type(*(a.encode("utf-8") for a in args), None)
-        return self.lib.mpv_command(self.handle, c_args)
+        with self._lock:
+            if not self.handle:
+                return -1
+            arr_type = ctypes.c_char_p * (len(args) + 1)
+            c_args = arr_type(*(a.encode("utf-8") for a in args), None)
+            return self.lib.mpv_command(self.handle, c_args)
 
     def command(self, cmd_str: str) -> int:
-        if not self.handle:
-            return -1
-        return self.lib.mpv_command_string(self.handle, cmd_str.encode("utf-8"))
+        with self._lock:
+            if not self.handle:
+                return -1
+            return self.lib.mpv_command_string(self.handle, cmd_str.encode("utf-8"))
 
     def set_property(self, name: str, value: Any) -> int:
-        if not self.handle:
-            return -1
-        ret = self.lib.mpv_set_property_string(self.handle, name.encode("utf-8"), str(value).encode("utf-8"))
-        if ret < 0 and name == "af" and str(value):
-            # Audio filter chain rejected; fallback safely to transparent filter
-            self.lib.mpv_set_property_string(self.handle, b"af", b"")
-        return ret
+        with self._lock:
+            if not self.handle:
+                return -1
+            ret = self.lib.mpv_set_property_string(self.handle, name.encode("utf-8"), str(value).encode("utf-8"))
+            if ret < 0 and name == "af" and str(value):
+                # Audio filter chain rejected; fallback safely to transparent filter
+                self.lib.mpv_set_property_string(self.handle, b"af", b"")
+            return ret
 
     def get_property(self, name: str) -> Optional[str]:
-        if not self.handle:
+        with self._lock:
+            if not self.handle:
+                return None
+            ptr = self.lib.mpv_get_property_string(self.handle, name.encode("utf-8"))
+            if ptr:
+                val = ctypes.string_at(ptr).decode("utf-8", errors="replace")
+                self.lib.mpv_free(ptr)
+                return val
             return None
-        ptr = self.lib.mpv_get_property_string(self.handle, name.encode("utf-8"))
-        if ptr:
-            val = ctypes.string_at(ptr).decode("utf-8", errors="replace")
-            self.lib.mpv_free(ptr)
-            return val
-        return None
 
     def get_property_float(self, name: str, default: float = 0.0) -> float:
         val = self.get_property(name)
@@ -489,15 +630,18 @@ class JonakiCore:
         if self.on_state_change:
             self.on_state_change(self.state)
 
-    def seek_relative(self, delta_seconds: float) -> None:
-        self.command(f"seek {delta_seconds} relative")
+    def seek_relative(self, delta_seconds: float, exact: bool = True) -> None:
+        mode = "relative+exact" if exact else "relative+keyframes"
+        self.command(f"seek {delta_seconds} {mode}")
 
-    def seek_absolute(self, target_seconds: float) -> None:
-        self.command(f"seek {max(0.0, target_seconds)} absolute")
+    def seek_absolute(self, target_seconds: float, exact: bool = True) -> None:
+        mode = "absolute+exact" if exact else "absolute+keyframes"
+        self.command(f"seek {max(0.0, target_seconds)} {mode}")
 
-    def seek_percent(self, percent: float) -> None:
+    def seek_percent(self, percent: float, exact: bool = True) -> None:
         p = max(0.0, min(100.0, percent))
-        self.command(f"seek {p} absolute-percent")
+        mode = "absolute-percent+exact" if exact else "absolute-percent+keyframes"
+        self.command(f"seek {p} {mode}")
 
     # --- Volume & Audio Controls ---
 
@@ -523,7 +667,7 @@ class JonakiCore:
 
     def set_equalizer_band(self, band_index: int, gain_db: float) -> None:
         if 0 <= band_index <= 9:
-            self.equalizer_bands[band_index] = max(-12.0, min(12.0, gain_db))
+            self.equalizer_bands[band_index] = max(-24.0, min(12.0, float(gain_db)))
             self._apply_audio_filters()
 
     def set_audio_delay(self, delay_sec: float) -> None:

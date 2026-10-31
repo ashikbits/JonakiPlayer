@@ -53,7 +53,7 @@ Jonaki implements the established control paradigms and workflow patterns of Pot
 * **Interactive Adjustments:** Subtitle timing sync offset (`[` / `]`, `Alt+Left` / `Alt+Right`), font size scaling (`Alt+PgUp` / `Alt+PgDn`), vertical positioning (`Alt+Up` / `Alt+Down`), and visibility toggling (`Alt+H`).
 
 ### 🎬 Video Engine, Shaders & Hardware Acceleration
-* **Zero-Copy Hardware Video Acceleration:** Direct GPU decoding via VA-API (Intel/AMD), NVDEC (NVIDIA), VDPAU, and Vulkan Video up to 8K 60fps with negligible CPU usage.
+* **Hardware Video Acceleration:** Direct GPU-accelerated video decoding via VA-API (Intel/AMD), NVDEC (NVIDIA), VDPAU, and Vulkan Video with direct X11/XWayland surface embedding.
 * **HDR to SDR Tone-Mapping:** High-fidelity HDR10 and HLG color-volume conversion to SDR displays via `libplacebo` algorithms (BT.2390, Reinhard, Mobius, Hable).
 * **GLSL Pixel Shaders:** Real-time post-processing shaders including 3x3 Sharpen, Adaptive Sharpen, and Denoise filters.
 * **Motion-Adaptive Deinterlacing (`Ctrl+F11`):** High-quality broadcast stream deinterlacing (`bwdif`, `yadif`, and hardware deinterlacing).
@@ -91,9 +91,9 @@ Jonaki embeds `libmpv` directly in-process using Python `ctypes`:
 * Enforces numeric C locale (`LC_NUMERIC="C"`) across glibc boundaries to prevent floating-point parsing discrepancies between GTK and `libmpv`.
 
 ### 2. Display Server & Surface Embedding
-* Operates cleanly across pure Wayland sessions (via XWayland surface abstraction) and native X11 servers.
+* Operates seamlessly across native X11 environments and Wayland sessions (via XWayland compatibility). Direct pure Wayland rendering via `mpv_render_context` / Wayland subsurfaces is on the development roadmap.
 * Automatically forces `gpu-context=x11egl` to ensure OpenGL contexts bind reliably to the GTK window ID without spawning detached secondary render surfaces.
-* Direct GPU OSD path routes high-priority notifications through `mpv`'s text pipeline, avoiding compositing flicker and Cairo buffer stalls over 4K/8K 60fps streams.
+* Direct GPU OSD path routes high-priority notifications through `mpv`'s text pipeline, avoiding compositing flicker and Cairo buffer stalls.
 
 ### 3. Inter-Process Communication & MPRIS2
 * Implements a local Unix domain socket coordinator (`$XDG_RUNTIME_DIR/jonaki_ipc.sock`) supporting single-instance playback delegation (`/current`) and independent execution (`/new`).

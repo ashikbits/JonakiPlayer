@@ -111,6 +111,7 @@ class PotSkinEngine:
         self.timebar: Optional[SkinSlider] = None
         self.volume_slider: Optional[SkinSlider] = None
         self.badges: List[SkinButton] = []
+        self.scale_factor: float = 1.0
 
         self._init_default_controls()
         self._load_dsf()
@@ -337,13 +338,24 @@ class PotSkinEngine:
                repeat_a: Optional[float] = None, repeat_b: Optional[float] = None,
                bookmarks: Optional[List[float]] = None,
                chapters: Optional[List[float]] = None,
-               media_info: Optional[Dict[str, Any]] = None) -> None:
+               media_info: Optional[Dict[str, Any]] = None,
+               scale_factor: Optional[float] = None) -> None:
         """
         Renders the complete control bar surface using authentic DSF sprites.
+        Supports dynamic HiDPI scaling without coordinate drift.
         """
+        if scale_factor is not None:
+            self.scale_factor = max(0.5, float(scale_factor))
+
         main_surf = self.surfaces.get("Main.png")
         if not main_surf:
             return
+
+        cr.save()
+        if self.scale_factor != 1.0:
+            cr.scale(self.scale_factor, self.scale_factor)
+            panel_width = int(panel_width / self.scale_factor)
+            panel_height = int(panel_height / self.scale_factor)
 
         if position_sec is None or math.isnan(position_sec) or math.isinf(position_sec):
             position_sec = 0.0
@@ -612,6 +624,7 @@ class PotSkinEngine:
             cr.set_source_surface(main_surf, bx - src_x, by - src_y)
             cr.paint()
             cr.restore()
+        cr.restore()
 
     def _format_time(self, seconds: Optional[float], total_duration: Optional[float] = None) -> str:
         if seconds is None or math.isnan(seconds) or math.isinf(seconds):
@@ -631,6 +644,9 @@ class PotSkinEngine:
         Prioritizes sliders with expanded vertical hit-box, then buttons, then badges.
         Respects playback state so play/pause overlapping buttons are correctly distinguished.
         """
+        if self.scale_factor != 1.0 and self.scale_factor > 0:
+            x = int(x / self.scale_factor)
+            y = int(y / self.scale_factor)
         # Timebar slider hit-test with padding
         if self.timebar:
             tx, ty, tw, th = self.timebar.rect
