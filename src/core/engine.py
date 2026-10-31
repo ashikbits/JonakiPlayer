@@ -827,6 +827,34 @@ class JonakiCore:
     def cycle_secondary_subtitle_track(self) -> None:
         self.command("cycle secondary-sid")
 
+    # --- Chapters ---
+
+    def get_chapters(self) -> List[Dict[str, Any]]:
+        raw = self.get_property("chapter-list")
+        if not raw:
+            return []
+        if isinstance(raw, list):
+            return raw
+        try:
+            return json.loads(raw)
+        except Exception:
+            return []
+
+    def get_current_chapter(self) -> int:
+        val = self.get_property_float("chapter", -1)
+        return int(val) if val is not None and val >= 0 else -1
+
+    def set_chapter(self, index: int) -> None:
+        self.set_property("chapter", str(index))
+
+    def next_chapter(self) -> bool:
+        self.command("add chapter 1")
+        return True
+
+    def prev_chapter(self) -> bool:
+        self.command("add chapter -1")
+        return True
+
     def get_media_detailed_info(self) -> Dict[str, Any]:
         """
         Collects comprehensive technical playback details matching the Ctrl+F1 dialog.

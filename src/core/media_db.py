@@ -171,6 +171,18 @@ class MediaDatabase:
                 return float(row["last_position"])
             return None
 
+    def get_playback_entry(self, file_path: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            SELECT last_position, duration, completed, audio_track, subtitle_track, volume
+            FROM playback_history WHERE file_path = ?
+            """, (file_path,))
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return None
+
     def get_recent_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()

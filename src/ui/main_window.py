@@ -9,6 +9,8 @@ import sys
 import time
 import random
 import threading
+import json
+from urllib.parse import unquote
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
@@ -34,6 +36,13 @@ from subtitle.subtitle_manager import SubtitleManager
 from subtitle.translator import SubtitleTranslator
 from torrent.manager import TorrentStreamManager
 from ui.torrent_dialog import TorrentStreamDialog
+
+
+def normalize_media_path(path: str) -> str:
+    """Normalizes file:// URIs and filesystem paths to local paths."""
+    if isinstance(path, str) and path.startswith("file://"):
+        return unquote(path[7:])
+    return path
 
 
 class JonakiMainWindow(Gtk.Window):
@@ -96,6 +105,18 @@ class JonakiMainWindow(Gtk.Window):
             self.dsp.enhancement_gain_db = 5.0
         self.dsp.set_enhancement_preset(enh_preset_saved)
         self.dsp.enhancement_enabled = (enh_enabled_saved == "1")
+
+        # Master volume and mute preferences
+        vol_saved = self.db.get_setting("master_volume", None)
+        self._initial_volume = None
+        if vol_saved is not None:
+            try:
+                self._initial_volume = max(0.0, min(100.0, float(vol_saved)))
+            except (ValueError, TypeError):
+                self._initial_volume = None
+        mute_saved = self.db.get_setting("master_muted", "0")
+        self._initial_muted = (mute_saved == "1")
+
         self.shader_mgr = VideoShaderManager()
         self.capture_mgr = MediaCaptureManager()
         self.sub_mgr = SubtitleManager()
@@ -110,6 +131,7 @@ class JonakiMainWindow(Gtk.Window):
         self.is_fullscreen: bool = False
         self._last_mouse_move_time = time.time()
         self._last_mouse_pos = (-1, -1)
+        self._last_seek_time: float = 0.0
         self._cursor_visible: bool = True
         self._controls_visible = True
         self._pending_playback: Optional[Any] = None
@@ -126,6 +148,10 @@ class JonakiMainWindow(Gtk.Window):
 
         # Core Playback Engine (libmpv C-FFI)
         self.core = JonakiCore()
+        if self._initial_volume is not None:
+            self.core.set_volume(self._initial_volume)
+        if self._initial_muted:
+            self.core.set_mute(True)
         self.core.on_time_update = lambda pos, dur: GLib.idle_add(self._on_core_time_update, pos, dur)
         self.core.on_state_change = lambda st: GLib.idle_add(self._on_core_state_change, st)
         self.core.on_file_end = lambda: GLib.idle_add(self._on_core_file_end)
@@ -227,14 +253,15 @@ class JonakiMainWindow(Gtk.Window):
         self._ui_timer_id = GLib.timeout_add(100, self._on_ui_tick)
 
         if initial_files:
-            self.add_files_to_playlist(initial_files, auto_play=True)
+            clean_files = [normalize_media_path(f) for f in initial_files]
+            self.add_files_to_playlist(clean_files, auto_play=True)
         else:
             # Restore saved playlist from MediaDatabase if available
             try:
                 saved_items = self.db.get_playlist_items()
                 if saved_items:
                     for row in saved_items:
-                        fp = row.get("file_path", "")
+                        fp = normalize_media_path(row.get("file_path", ""))
                         if fp and (os.path.exists(fp) or any(fp.startswith(p) for p in ("http://", "https://", "rtsp://", "rtmp://", "ytdl://"))):
                             self.playlist.append({
                                 "path": fp,
@@ -550,6 +577,7 @@ class JonakiMainWindow(Gtk.Window):
         w, h = alloc.width, alloc.height
         is_playing = (self.core.state == PlaybackState.PLAYING)
         bms = [b["timestamp"] for b in self.db.get_bookmarks(self.core.current_file or "")]
+        chapters = [float(c.get("time", 0.0)) for c in self.core.get_chapters()]
 
         media_info = {
             "hwdec": self.core.hwdec_active,
@@ -563,7 +591,7 @@ class JonakiMainWindow(Gtk.Window):
         self.skin.render(cr, w, h, is_playing=is_playing,
                          position_sec=self.core.position, duration_sec=self.core.duration,
                          repeat_a=self.core.repeat_a, repeat_b=self.core.repeat_b,
-                         bookmarks=bms, media_info=media_info)
+                         bookmarks=bms, media_info=media_info, chapters=chapters)
 
     # --- Mouse & Interaction Handlers ---
 
@@ -626,11 +654,26 @@ class JonakiMainWindow(Gtk.Window):
                     self.toggle_play_pause()
                     return False
                 self._click_timer_id = GLib.timeout_add(250, _do_click)
+        elif event.button == 2:
+            # Middle-click: Play / Pause toggle
+            if self._click_timer_id:
+                GLib.source_remove(self._click_timer_id)
+                self._click_timer_id = None
+            self.toggle_play_pause()
+            return True
         elif event.button == 3:
             if self._click_timer_id:
                 GLib.source_remove(self._click_timer_id)
                 self._click_timer_id = None
             self.context_menu.popup(event, self.core, recent_files=self.db.get_recent_history(15))
+        elif event.button == 8:
+            # Mouse back button: previous file
+            self.play_prev()
+            return True
+        elif event.button == 9:
+            # Mouse forward button: next file
+            self.play_next()
+            return True
         return True
 
     def _on_window_button_press(self, widget, event):
@@ -651,9 +694,11 @@ class JonakiMainWindow(Gtk.Window):
     def _on_video_scroll(self, widget, event):
         if event.direction == Gdk.ScrollDirection.UP:
             self.core.adjust_volume(+2.0)
+            self._save_audio_settings()
             self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
         elif event.direction == Gdk.ScrollDirection.DOWN:
             self.core.adjust_volume(-2.0)
+            self._save_audio_settings()
             self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
         elif event.direction == Gdk.ScrollDirection.SMOOTH:
             _, delta_y = event.get_scroll_deltas()
@@ -661,6 +706,7 @@ class JonakiMainWindow(Gtk.Window):
                 step = max(0.5, min(5.0, abs(delta_y) * 2.0))
                 change = +step if delta_y < 0 else -step
                 self.core.adjust_volume(change)
+                self._save_audio_settings()
                 self.osd.show_osd(f"Volume: {int(self.core.volume)}%")
         return True
 
@@ -708,6 +754,7 @@ class JonakiMainWindow(Gtk.Window):
                 tx, ty, tw, th = self.skin.timebar.rect
                 ratio = max(0.0, min(1.0, (event.x - tx) / tw))
                 self.skin.timebar.drag_ratio = ratio
+                self._last_seek_time = time.time()
                 self.core.seek_percent(ratio * 100.0)
             elif hit == self.skin.volume_slider:
                 self.skin.volume_slider.is_dragging = True
@@ -723,10 +770,14 @@ class JonakiMainWindow(Gtk.Window):
 
     def _on_skin_button_release(self, widget, event):
         if self.skin.timebar:
+            if self.skin.timebar.is_dragging and self.skin.timebar.drag_ratio is not None:
+                self.core.seek_percent(self.skin.timebar.drag_ratio * 100.0)
             self.skin.timebar.is_dragging = False
             self.skin.timebar.drag_ratio = None
             self.skin.timebar.state = 0
         if self.skin.volume_slider:
+            if self.skin.volume_slider.is_dragging:
+                self._save_audio_settings()
             self.skin.volume_slider.is_dragging = False
             self.skin.volume_slider.state = 0
         for btn in self.skin.buttons + self.skin.badges:
@@ -740,7 +791,10 @@ class JonakiMainWindow(Gtk.Window):
             tx, ty, tw, th = self.skin.timebar.rect
             ratio = max(0.0, min(1.0, (x - tx) / tw))
             self.skin.timebar.drag_ratio = ratio
-            self.core.seek_percent(ratio * 100.0)
+            now = time.time()
+            if now - getattr(self, "_last_seek_time", 0.0) >= 0.06:
+                self._last_seek_time = now
+                self.core.seek_percent(ratio * 100.0)
         elif self.skin.volume_slider and self.skin.volume_slider.is_dragging:
             vx, vy, vw, vh = self.skin.volume_slider.rect
             ratio = max(0.0, min(1.0, (x - vx) / vw))
@@ -1055,6 +1109,12 @@ class JonakiMainWindow(Gtk.Window):
             self.core.set_subtitle_font_size(sz)
             self.osd.show_osd(f"Subtitle Size: {sz} pt")
             return True
+        if shift and not (ctrl or alt) and keyval in (Gdk.KEY_Page_Down, Gdk.KEY_KP_Page_Down):
+            self.handle_command("CMD_CHAPTER_NEXT")
+            return True
+        if shift and not (ctrl or alt) and keyval in (Gdk.KEY_Page_Up, Gdk.KEY_KP_Page_Up):
+            self.handle_command("CMD_CHAPTER_PREV")
+            return True
         if not (ctrl or alt or shift) and keyval in (Gdk.KEY_Page_Down, Gdk.KEY_KP_Page_Down):
             self.play_next()
             return True
@@ -1157,8 +1217,9 @@ class JonakiMainWindow(Gtk.Window):
             return True
 
         # Mute
-        if keyval in (Gdk.KEY_m, Gdk.KEY_M):
+        if not (ctrl or alt or shift) and keyval in (Gdk.KEY_m, Gdk.KEY_M):
             self.core.toggle_mute()
+            self._save_audio_settings()
             self.osd.show_osd("Mute: ON" if self.core.is_muted else "Mute: OFF")
             return True
 
@@ -1227,19 +1288,25 @@ class JonakiMainWindow(Gtk.Window):
         if keyval == Gdk.KEY_F4 and not alt:
             self.handle_command("CMD_MEDIA_CLOSE")
             return True
-        if keyval == Gdk.KEY_F5:
-            self.control_box.show_all()
-            return True
-        if keyval == Gdk.KEY_F6:
-            self.control_box.show_all()
+        if keyval in (Gdk.KEY_F5, Gdk.KEY_F6):
+            if self.control_box.get_visible():
+                self.control_box.hide()
+            else:
+                self.control_box.show_all()
             return True
         if keyval == Gdk.KEY_F7:
-            self.control_box.show_all()
-            if hasattr(self.control_box, "select_tab"):
-                self.control_box.select_tab(0)
+            if self.control_box.get_visible() and self.control_box.notebook.get_current_page() == 0:
+                self.control_box.hide()
+            else:
+                self.control_box.show_all()
+                if hasattr(self.control_box, "select_tab"):
+                    self.control_box.select_tab(0)
             return True
         if keyval in (Gdk.KEY_F8, Gdk.KEY_F12):
-            self.playlist_window.show_all()
+            if self.playlist_window.get_visible():
+                self.playlist_window.hide()
+            else:
+                self.playlist_window.show_all()
             return True
 
         # Capture: Ctrl+P (Snapshot), Ctrl+E (Save Frame As), Ctrl+C (Copy Frame), Ctrl+Alt+G (GIF), Ctrl+Alt+S (Search Subtitles Online)
@@ -1330,6 +1397,7 @@ class JonakiMainWindow(Gtk.Window):
         elif cmd_id == "CMD_MEDIA_CLOSE":
             self._save_current_position()
             self.core.stop()
+            self.set_title("Jonaki")
             if hasattr(self, "torrent_manager") and self.torrent_manager:
                 self.torrent_manager.stop_session()
         elif cmd_id == "ID_PLAYBACK_5SEC_BACK":
@@ -1344,6 +1412,15 @@ class JonakiMainWindow(Gtk.Window):
             self._open_from_clipboard()
         elif cmd_id == "CMD_OPEN_FOLDER":
             self._open_folder_dialog()
+        elif cmd_id == "CMD_OPEN_CONTAINING_FOLDER":
+            cur_f = self.core.current_file
+            if cur_f and os.path.exists(cur_f):
+                folder = os.path.dirname(os.path.abspath(cur_f))
+                import subprocess
+                try:
+                    subprocess.Popen(["xdg-open", folder])
+                except Exception as e:
+                    print(f"[Jonaki] Failed to open folder: {e}")
         elif cmd_id == "CMD_OPEN_URL":
             self._open_url_dialog()
         elif cmd_id in ("CMD_OPEN_TORRENT", "ID_OPEN_TORRENT"):
@@ -1359,7 +1436,26 @@ class JonakiMainWindow(Gtk.Window):
             self.osd.show_osd("Webcam Device")
         elif cmd_id == "CMD_OPEN_SPECIFIC_FILE":
             if arg:
-                self.play_file(arg)
+                self.add_files_to_playlist([arg], auto_play=True, clear_existing=True)
+        elif cmd_id == "CMD_SET_CHAPTER":
+            if arg is not None:
+                self.core.set_chapter(int(arg))
+                chs = self.core.get_chapters()
+                idx = int(arg)
+                title = chs[idx].get("title") if 0 <= idx < len(chs) else f"Chapter {idx + 1}"
+                self.osd.show_osd(f"Chapter: {title}")
+        elif cmd_id == "CMD_CHAPTER_PREV":
+            self.core.prev_chapter()
+            cur_idx = self.core.get_current_chapter()
+            chs = self.core.get_chapters()
+            title = chs[cur_idx].get("title") if 0 <= cur_idx < len(chs) else "Previous Chapter"
+            self.osd.show_osd(f"Chapter: {title}")
+        elif cmd_id == "CMD_CHAPTER_NEXT":
+            self.core.next_chapter()
+            cur_idx = self.core.get_current_chapter()
+            chs = self.core.get_chapters()
+            title = chs[cur_idx].get("title") if 0 <= cur_idx < len(chs) else "Next Chapter"
+            self.osd.show_osd(f"Chapter: {title}")
         elif cmd_id == "CMD_CLEAR_RECENT_FILES":
             self.db.clear_history()
             self.osd.show_osd("Recent Files Cleared")
@@ -1757,6 +1853,11 @@ class JonakiMainWindow(Gtk.Window):
     def _on_core_time_update(self, pos: float, dur: float):
         if self.skin.volume_slider:
             self.skin.volume_slider.value = self.core.volume / 100.0
+        if dur > 0 and 0 <= self.current_index < len(self.playlist):
+            item = self.playlist[self.current_index]
+            if item.get("duration", 0.0) <= 0.0 or abs(item.get("duration", 0.0) - dur) > 1.0:
+                item["duration"] = dur
+                self.playlist_window.update_playlist(self.playlist)
 
     def _on_core_state_change(self, state: str):
         self.skin_area.queue_draw()
@@ -1766,11 +1867,24 @@ class JonakiMainWindow(Gtk.Window):
     def _on_core_file_end(self):
         if self.core.current_file:
             try:
+                kwargs = {
+                    "duration": getattr(self.core, "duration", 0.0),
+                    "title": self.core.current_title or os.path.basename(self.core.current_file)
+                }
+                aid = self.core.get_property("aid") if hasattr(self.core, "get_property") else None
+                sid = self.core.get_property("sid") if hasattr(self.core, "get_property") else None
+                vol = getattr(self.core, "volume", None)
+                if isinstance(aid, str) and aid and aid != "no":
+                    kwargs["audio_track"] = aid
+                if isinstance(sid, str) and sid and sid != "no":
+                    kwargs["subtitle_track"] = sid
+                if isinstance(vol, (int, float)):
+                    kwargs["volume"] = float(vol)
+
                 self.db.save_playback_position(
                     self.core.current_file,
                     self.core.position,
-                    duration=self.core.duration,
-                    title=self.core.current_title or os.path.basename(self.core.current_file)
+                    **kwargs
                 )
             except Exception as e:
                 print(f"[MediaDB] Failed to save resume position on file end: {e}")
@@ -1791,9 +1905,10 @@ class JonakiMainWindow(Gtk.Window):
 
         start_index = len(self.playlist)
         for fp in file_paths:
+            clean_fp = normalize_media_path(fp)
             self.playlist.append({
-                "path": fp,
-                "title": os.path.basename(fp),
+                "path": clean_fp,
+                "title": os.path.basename(clean_fp),
                 "duration": 0.0
             })
         self.playlist_window.update_playlist(self.playlist)
@@ -1806,18 +1921,43 @@ class JonakiMainWindow(Gtk.Window):
             target_index = start_index if start_index < len(self.playlist) else 0
             self.play_index(target_index, seek_pts=seek_pts, sub_file=sub_file, audio_file=audio_file)
 
+    def _save_audio_settings(self) -> None:
+        try:
+            vol = getattr(self.core, "volume", None)
+            if isinstance(vol, (int, float)):
+                self.db.set_setting("master_volume", str(round(vol, 1)))
+            is_muted = getattr(self.core, "is_muted", False)
+            if isinstance(is_muted, bool):
+                self.db.set_setting("master_muted", "1" if is_muted else "0")
+        except Exception as e:
+            print(f"[MediaDB] Failed to save audio settings: {e}")
+
     def _save_current_position(self) -> None:
         pos = getattr(self.core, "position", None)
         if self.core.current_file and isinstance(pos, (int, float)) and pos > 5.0:
             try:
+                kwargs = {
+                    "duration": getattr(self.core, "duration", 0.0),
+                    "title": self.core.current_title or os.path.basename(self.core.current_file)
+                }
+                aid = self.core.get_property("aid") if hasattr(self.core, "get_property") else None
+                sid = self.core.get_property("sid") if hasattr(self.core, "get_property") else None
+                vol = getattr(self.core, "volume", None)
+                if isinstance(aid, str) and aid and aid != "no":
+                    kwargs["audio_track"] = aid
+                if isinstance(sid, str) and sid and sid != "no":
+                    kwargs["subtitle_track"] = sid
+                if isinstance(vol, (int, float)):
+                    kwargs["volume"] = float(vol)
+
                 self.db.save_playback_position(
                     self.core.current_file,
                     pos,
-                    duration=getattr(self.core, "duration", 0.0),
-                    title=self.core.current_title or os.path.basename(self.core.current_file)
+                    **kwargs
                 )
             except Exception as e:
                 print(f"[MediaDB] Failed to save playback position: {e}")
+        self._save_audio_settings()
 
     def play_index(self, index: int, seek_pts: float = 0.0, sub_file: Optional[str] = None, audio_file: Optional[str] = None) -> None:
         if 0 <= index < len(self.playlist):
@@ -1855,6 +1995,7 @@ class JonakiMainWindow(Gtk.Window):
                 else:
                     self._save_current_position()
                     self.core.stop()
+                    self.set_title("Jonaki")
                     self.current_index = -1
             elif index < self.current_index:
                 self.current_index -= 1
@@ -1907,6 +2048,7 @@ class JonakiMainWindow(Gtk.Window):
         self.osd.show_osd(f"AI Subtitle Translation: {'ON' if active else 'OFF'}")
 
     def play_file(self, file_path: str, seek_pts: float = 0.0, sub_file: Optional[str] = None, audio_file: Optional[str] = None) -> None:
+        file_path = normalize_media_path(file_path)
         if file_path.startswith("magnet:") or file_path.lower().endswith(".torrent"):
             self._open_torrent_dialog(initial_source=file_path)
             return
@@ -1920,7 +2062,14 @@ class JonakiMainWindow(Gtk.Window):
             self.set_title(f"Jonaki - {os.path.basename(file_path)}")
             return
 
-        if seek_pts <= 0.0:
+        saved_entry = self.db.get_playback_entry(file_path)
+        if saved_entry:
+            if seek_pts <= 0.0:
+                saved_pts = saved_entry.get("last_position")
+                if saved_pts is not None and saved_pts > 5.0 and not saved_entry.get("completed", 0):
+                    seek_pts = saved_pts
+                    self.osd.show_osd(f"Resumed at {self.skin._format_time(saved_pts)}")
+        elif seek_pts <= 0.0:
             saved_pts = self.db.get_playback_position(file_path)
             if saved_pts is not None and saved_pts > 5.0:
                 seek_pts = saved_pts
@@ -1929,6 +2078,15 @@ class JonakiMainWindow(Gtk.Window):
         self.core.load_file(file_path, start_pts=seek_pts, sub_file=sub_file, audio_file=audio_file)
         self.set_title(f"Jonaki - {os.path.basename(file_path)}")
         self.apply_audio_filters()
+
+        if saved_entry:
+            saved_aid = saved_entry.get("audio_track")
+            saved_sid = saved_entry.get("subtitle_track")
+            if saved_aid and not audio_file:
+                GLib.timeout_add(300, lambda: self.core.set_audio_track(saved_aid))
+            if saved_sid and not sub_file:
+                GLib.timeout_add(300, lambda: self.core.set_subtitle_track(saved_sid))
+
         if hasattr(self, "mpris") and self.mpris:
             self.mpris.notify_playback_changed()
 
@@ -2183,6 +2341,7 @@ class JonakiMainWindow(Gtk.Window):
         if hasattr(self, "torrent_manager") and self.torrent_manager:
             self.torrent_manager.stop_session()
         self._save_current_position()
+        self._save_audio_settings()
         try:
             self.db.save_playlist(self.playlist)
         except Exception as e:

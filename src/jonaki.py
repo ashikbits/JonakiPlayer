@@ -327,6 +327,8 @@ def main():
                 "volume": options["volume"],
                 "title": options["title"],
                 "config": options["config"],
+                "sort": options.get("sort", False),
+                "randomize": options.get("randomize", False),
                 "filedlg": options.get("filedlg", False),
                 "folderdlg": options.get("folderdlg", False),
                 "urldlg": options.get("urldlg", False),
@@ -342,6 +344,9 @@ def main():
 
     # Initialize Main Application Window
     win = JonakiMainWindow(config_preset=options["config"])
+
+    if options.get("user_agent"):
+        win.core.set_property("user-agent", options["user_agent"])
 
     if options["volume"] is not None:
         win.core.set_volume(options["volume"])
@@ -362,6 +367,19 @@ def main():
             win.core.load_subtitle(options["sub"])
         if options["aud"]:
             win.core.load_audio_track(options["aud"])
+
+    if options.get("sort"):
+        win.sort_playlist()
+    elif options.get("randomize"):
+        win.shuffle_playlist()
+
+    if options.get("title"):
+        win.set_title(f"Jonaki - {options['title']}")
+
+    if options.get("pause"):
+        win.core.pause()
+    elif options.get("play"):
+        win.core.play()
 
     # Launch IPC Server for receiving secondary instance requests
     def _ipc_handler(msg: dict) -> dict:
@@ -396,6 +414,11 @@ def main():
                     GLib.idle_add(win.core.load_audio_track, aud_val)
                 if seek_val > 0:
                     GLib.idle_add(win.core.seek_absolute, seek_val)
+
+            if msg.get("sort"):
+                GLib.idle_add(win.sort_playlist)
+            elif msg.get("randomize"):
+                GLib.idle_add(win.shuffle_playlist)
 
             if msg.get("filedlg"):
                 GLib.idle_add(win.handle_command, "CMD_OPEN_FILE")

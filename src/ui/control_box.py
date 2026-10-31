@@ -45,8 +45,14 @@ class ControlBoxDialog(Gtk.Window):
         self.connect("key-press-event", self._on_key_press)
 
     def _on_key_press(self, widget, event):
-        if event.keyval == Gdk.KEY_Escape:
+        if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_F5, Gdk.KEY_F6):
             self.hide()
+            return True
+        if event.keyval == Gdk.KEY_F7:
+            if self.notebook.get_current_page() == 0:
+                self.hide()
+            else:
+                self.select_tab(0)
             return True
         return False
 

@@ -97,6 +97,76 @@ class TestUIUXImprovements(unittest.TestCase):
         # 2 items + 1 separator + 1 clear item = 4
         self.assertEqual(len(children), 4)
 
+    def test_uri_normalization(self):
+        from ui.main_window import normalize_media_path
+        self.assertEqual(normalize_media_path("file:///home/user/my%20video.mp4"), "/home/user/my video.mp4")
+        self.assertEqual(normalize_media_path("/home/user/video.mkv"), "/home/user/video.mkv")
+        self.assertEqual(normalize_media_path("https://example.com/stream.m3u8"), "https://example.com/stream.m3u8")
+
+    def test_media_db_playback_entry_persistence(self):
+        from core.media_db import MediaDatabase
+        with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tf:
+            db_path = tf.name
+        try:
+            db = MediaDatabase(db_path=db_path)
+            db.save_playback_position("/tmp/test.mkv", 45.2, duration=120.0, title="Test Movie",
+                                      audio_track="2", subtitle_track="1", volume=85.0)
+            entry = db.get_playback_entry("/tmp/test.mkv")
+            self.assertIsNotNone(entry)
+            self.assertAlmostEqual(entry["last_position"], 45.2, places=1)
+            self.assertAlmostEqual(entry["duration"], 120.0, places=1)
+            self.assertEqual(str(entry["audio_track"]), "2")
+            self.assertEqual(str(entry["subtitle_track"]), "1")
+            self.assertAlmostEqual(entry["volume"], 85.0, places=1)
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+
+    def test_core_chapters_api(self):
+        from unittest.mock import MagicMock
+        from core.engine import JonakiCore
+        core = JonakiCore()
+        fake_chapters = [
+            {"title": "Intro", "time": 0.0},
+            {"title": "Action Scene", "time": 150.0},
+            {"title": "Credits", "time": 600.0}
+        ]
+        core._mpv = MagicMock()
+        core.get_property = MagicMock(side_effect=lambda prop: fake_chapters if prop == "chapter-list" else "1" if prop == "chapter" else None)
+        core.get_property_float = MagicMock(return_value=1.0)
+        core.set_property = MagicMock()
+        core.command = MagicMock()
+
+        chapters = core.get_chapters()
+        self.assertEqual(len(chapters), 3)
+        self.assertEqual(chapters[1]["title"], "Action Scene")
+        current_idx = core.get_current_chapter()
+        self.assertEqual(current_idx, 1)
+
+        # Set, Next, Prev
+        core.set_chapter(2)
+        core.set_property.assert_called_with("chapter", "2")
+        core.next_chapter()
+        core.command.assert_any_call("add chapter 1")
+        core.prev_chapter()
+        core.command.assert_any_call("add chapter -1")
+
+    def test_skin_render_chapter_ticks(self):
+        import cairo
+        skin = PotSkinEngine()
+        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, 960, 62)
+        cr = cairo.Context(surface)
+        # Verify render succeeds with chapter tick marks
+        skin.render(cr, 960, 62, is_playing=True, position_sec=45.0, duration_sec=300.0,
+                    chapters=[60.0, 120.0, 240.0])
+
+    def test_cli_sort_randomize_title(self):
+        opts = parse_arguments(["jonaki", "/sort", "/randomize", "/title=MyMovie", "/user_agent=CustomAgent"])
+        self.assertTrue(opts["sort"])
+        self.assertTrue(opts["randomize"])
+        self.assertEqual(opts["title"], "MyMovie")
+        self.assertEqual(opts["user_agent"], "CustomAgent")
+
 
 if __name__ == "__main__":
     unittest.main()

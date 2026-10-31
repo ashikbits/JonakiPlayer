@@ -36,7 +36,9 @@ class PlaylistWindow(Gtk.Window):
         self.list_store = Gtk.ListStore(int, str, str, str)
         self.tree_view = Gtk.TreeView(model=self.list_store)
         self.tree_view.set_headers_visible(True)
+        self.tree_view.set_reorderable(True)
         self.tree_view.connect("row-activated", self._on_row_activated)
+        self.tree_view.connect("drag-end", self._on_drag_end)
 
         # Drag and Drop support for URI lists
         self.tree_view.drag_dest_set(Gtk.DestDefaults.ALL, [], Gdk.DragAction.COPY)
@@ -95,13 +97,42 @@ class PlaylistWindow(Gtk.Window):
         self.connect("key-press-event", self._on_key_press)
 
     def _on_key_press(self, widget, event):
-        if event.keyval == Gdk.KEY_Escape:
+        if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_F8, Gdk.KEY_F12):
             self.hide()
             return True
         elif event.keyval in (Gdk.KEY_Delete, Gdk.KEY_BackSpace, Gdk.KEY_KP_Delete):
             self._on_remove_clicked(None)
             return True
         return False
+
+    def _on_drag_end(self, widget, context):
+        if self.search_entry.get_text().strip():
+            return
+        new_playlist = []
+        current_path = None
+        cur_idx = getattr(self.player, "current_index", -1)
+        if 0 <= cur_idx < len(self.player.playlist):
+            current_path = self.player.playlist[cur_idx]["path"]
+
+        path_map = {item["path"]: item for item in self.player.playlist}
+        for row in self.list_store:
+            fp = row[3]
+            if fp in path_map:
+                new_playlist.append(path_map[fp])
+
+        if len(new_playlist) == len(self.player.playlist):
+            self.player.playlist = new_playlist
+            if current_path:
+                for i, it in enumerate(self.player.playlist):
+                    if it["path"] == current_path:
+                        self.player.current_index = i
+                        break
+            try:
+                self.player.db.save_playlist(self.player.playlist)
+            except Exception:
+                pass
+            for i, row in enumerate(self.list_store):
+                row[0] = i + 1
 
     def _on_drag_data_received(self, widget, drag_context, x, y, data, info, time):
         uris = data.get_uris()

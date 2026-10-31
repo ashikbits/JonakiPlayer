@@ -26,6 +26,7 @@ class PotContextMenu:
         self.aspect_menu = Gtk.Menu()
         self.orientation_menu = Gtk.Menu()
         self.bookmarks_menu = Gtk.Menu()
+        self.chapters_menu = Gtk.Menu()
         self.recent_menu = Gtk.Menu()
 
         self._build_menu()
@@ -39,6 +40,7 @@ class PotContextMenu:
         self._add_action(open_menu, "Open URL... \tCtrl+U", "CMD_OPEN_URL")
         self._add_action(open_menu, "Open Torrent / Magnet... \tCtrl+M", "CMD_OPEN_TORRENT")
         self._add_action(open_menu, "Open Folder... \tF2", "CMD_OPEN_FOLDER")
+        self._add_action(open_menu, "Open Containing Folder", "CMD_OPEN_CONTAINING_FOLDER")
         self._add_separator(open_menu)
         self._add_action(open_menu, "Open Screen Capture", "CMD_OPEN_SCREEN_CAPTURE")
         self._add_action(open_menu, "Open Webcam / Device \tCtrl+J", "CMD_OPEN_WEBCAM")
@@ -67,6 +69,11 @@ class PotContextMenu:
         self._add_action(playback_menu, "Speed: Faster (+0.1x) \tC", "CMD_SPEED_UP")
         self._add_separator(playback_menu)
 
+        # Chapters submenu
+        chap_item = Gtk.MenuItem(label="Chapters")
+        chap_item.set_submenu(self.chapters_menu)
+        playback_menu.append(chap_item)
+
         # Bookmarks submenu
         bm_item = Gtk.MenuItem(label="Bookmarks")
         bm_item.set_submenu(self.bookmarks_menu)
@@ -80,10 +87,10 @@ class PotContextMenu:
         # A-B Repeat submenu
         ab_item = Gtk.MenuItem(label="A-B Repeat")
         ab_menu = Gtk.Menu()
-        self._add_action(ab_menu, "Set A (Start) \t[", "CMD_REPEAT_SET_A")
-        self._add_action(ab_menu, "Set B (End) \t]", "CMD_REPEAT_SET_B")
+        self._add_action(ab_menu, "Set A (Start) \tCtrl+[", "CMD_REPEAT_SET_A")
+        self._add_action(ab_menu, "Set B (End) \tCtrl+]", "CMD_REPEAT_SET_B")
         self._add_separator(ab_menu)
-        self._add_action(ab_menu, "Clear Repeat \t\\", "CMD_REPEAT_CLEAR")
+        self._add_action(ab_menu, "Clear Repeat \tCtrl+\\", "CMD_REPEAT_CLEAR")
         ab_item.set_submenu(ab_menu)
         playback_menu.append(ab_item)
 
@@ -388,6 +395,34 @@ class PotContextMenu:
                 self.sub_sec_streams_menu.append(item)
 
         self.sub_sec_streams_menu.show_all()
+
+        # 4. Chapters
+        for child in self.chapters_menu.get_children():
+            self.chapters_menu.remove(child)
+            child.destroy()
+
+        chapters = core.get_chapters() if hasattr(core, "get_chapters") else []
+        cur_ch = core.get_current_chapter() if hasattr(core, "get_current_chapter") else -1
+
+        if chapters:
+            self._add_action(self.chapters_menu, "Previous Chapter \tShift+PgUp", "CMD_CHAPTER_PREV")
+            self._add_action(self.chapters_menu, "Next Chapter \tShift+PgDn", "CMD_CHAPTER_NEXT")
+            self._add_separator(self.chapters_menu)
+            for idx, ch in enumerate(chapters):
+                title = ch.get("title") or f"Chapter {idx + 1}"
+                ch_time = float(ch.get("time", 0.0))
+                s = int(ch_time)
+                time_str = f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}" if s >= 3600 else f"{(s%3600)//60:02d}:{s%60:02d}"
+                prefix = "✓ " if idx == cur_ch else "   "
+                item = Gtk.MenuItem(label=f"{prefix}{idx + 1}. {title} ({time_str})")
+                item.connect("activate", lambda w, target_idx=idx: self.dispatch("CMD_SET_CHAPTER", target_idx))
+                self.chapters_menu.append(item)
+        else:
+            none_item = Gtk.MenuItem(label="No Chapters Available")
+            none_item.set_sensitive(False)
+            self.chapters_menu.append(none_item)
+
+        self.chapters_menu.show_all()
 
     def _add_action(self, parent_menu: Gtk.Menu, label: str, cmd_id: str) -> None:
         item = Gtk.MenuItem(label=label)

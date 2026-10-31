@@ -23,7 +23,6 @@ class SubtitleTranslator:
         self.max_cache_size = max_cache_size
         # In-memory bounded LRU cache: (text, src, dst) -> translated_text
         self._cache: OrderedDict[Tuple[str, str, str], str] = OrderedDict()
-        import threading
         self._lock = threading.Lock()
 
     @property

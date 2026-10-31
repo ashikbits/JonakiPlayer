@@ -210,13 +210,13 @@ class PotSkinEngine:
         self.badge_hdr = SkinButton("ID_VIDEO_PS_SMPTE_2084", "HDR Tone-mapping (Click to Toggle)", 42, 14, 485, 34, 41, 14, min_parent_width=510)
         self.badge_hdr.label_text = "HDR"
 
-        self.badge_video = SkinButton("CMD_VIDEO_CODEC_FOURCC_MESSAGE", "Video Codec", 44, 14, 485, 34, 41, 14, min_parent_width=580)
+        self.badge_video = SkinButton("CMD_VIDEO_CODEC_FOURCC_MESSAGE", "Video Codec (Click for Media Information Ctrl+F1)", 44, 14, 485, 34, 41, 14, min_parent_width=580)
         self.badge_video.label_text = "AV1"
 
-        self.badge_audio = SkinButton("CMD_AUDIO_CODEC_TYPE_MESSAGE", "Audio Codec", 48, 14, 485, 34, 41, 14, min_parent_width=650)
+        self.badge_audio = SkinButton("CMD_AUDIO_CODEC_TYPE_MESSAGE", "Audio Codec (Click to Cycle Track)", 48, 14, 485, 34, 41, 14, min_parent_width=650)
         self.badge_audio.label_text = "OPUS"
 
-        self.badge_channel = SkinButton("CMD_AUDIO_OUT_NUM_CHANNEL_MESSAGE", "Audio Channels", 36, 14, 485, 34, 41, 14, min_parent_width=710)
+        self.badge_channel = SkinButton("CMD_AUDIO_OUT_NUM_CHANNEL_MESSAGE", "Audio Channels (Click for Equalizer & DSP)", 36, 14, 485, 34, 41, 14, min_parent_width=710)
         self.badge_channel.label_text = "2.0"
 
         self.badges = [
@@ -336,6 +336,7 @@ class PotSkinEngine:
                is_playing: bool = True, position_sec: float = 0.0, duration_sec: float = 0.0,
                repeat_a: Optional[float] = None, repeat_b: Optional[float] = None,
                bookmarks: Optional[List[float]] = None,
+               chapters: Optional[List[float]] = None,
                media_info: Optional[Dict[str, Any]] = None) -> None:
         """
         Renders the complete control bar surface using authentic DSF sprites.
@@ -436,6 +437,20 @@ class PotSkinEngine:
                     cr.close_path()
                     cr.fill()
                     cr.restore()
+
+            # Chapter tick markers (crisp silver dividers along the seek track)
+            if chapters and duration_sec > 0:
+                for ch_pts in chapters:
+                    if ch_pts > 0:
+                        cx = max(tx, min(tx + tw, tx + int((ch_pts / duration_sec) * tw)))
+                        cr.save()
+                        cr.set_source_rgba(0.0, 0.0, 0.0, 0.7)
+                        cr.rectangle(cx - 0.5, ty, 2.0, th)
+                        cr.fill()
+                        cr.set_source_rgba(0.85, 0.85, 0.90, 0.85)
+                        cr.rectangle(cx, ty, 1.0, th)
+                        cr.fill()
+                        cr.restore()
 
             # Thumb Playhead knob (1, 239, 11, 10; hover/down at offset +14)
             tt_x = tx + int(tw * progress) - 5

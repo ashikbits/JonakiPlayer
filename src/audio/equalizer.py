@@ -49,6 +49,9 @@ class EqualizerModel:
             return True
         return False
 
+    def set_preset(self, preset_name: str) -> bool:
+        return self.apply_preset(preset_name)
+
     def reset(self) -> None:
         self.bands = [0.0] * 10
         self.preamp_db = 0.0
