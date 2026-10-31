@@ -430,6 +430,10 @@ class JonakiMainWindow(Gtk.Window):
 
         # Auto-hide controls in fullscreen & cursor during active playback
         if self.core.state == PlaybackState.PLAYING:
+            # Keep PC awake and prevent display dimming via periodic power inhibitor heartbeat
+            if hasattr(self, "power_inhibitor") and self.power_inhibitor:
+                self.power_inhibitor.heartbeat()
+
             if time.time() - self._last_mouse_move_time > 2.5:
                 # In fullscreen, auto-hide the bottom skin control bar and top bar
                 if self.is_fullscreen and self._controls_visible:
