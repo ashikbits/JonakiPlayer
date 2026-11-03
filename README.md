@@ -45,8 +45,9 @@ Jonaki implements the established control paradigms and workflow patterns of Pot
 * **Volume Boost PreAmp (`Shift+Up` / `Shift+Down`):** Clean pre-amplification boost up to +24 dB for low-level media tracks.
 * **Precision Audio Delay Sync (`Shift+[` / `Shift+]`):** Millisecond-accurate audio/video synchronization adjustments in 50 ms steps with instant reset (`Shift+\`).
 
-### 💬 Dual Subtitles, AI Translation & Online Search
+### 💬 Subtitles, Styling, AI Translation & Online Search
 * **Simultaneous Dual Subtitles:** Render primary subtitles along the bottom and secondary subtitles at the top (or custom positions) concurrently with independent stream selection (`S` / `Shift+S`).
+* **Customizable Subtitle Styling (`Alt+E`):** PotPlayer-grade visual styling dialog configuring font families, font sizes, bold/italic, character spacing, primary text colors, outline/border colors and widths, drop-shadow colors and offsets, background bounding box colors and opacity, and ASS override modes (`scale`, `yes`, `force`, `strip`, `no`). All styling preferences persist automatically across sessions (`~/.config/jonaki/subtitle_style.json`).
 * **Real-Time AI Subtitle Translation (`Alt+T`):** Live translation of foreign-language subtitles powered by cloud APIs (DeepL, Google) or local LLM runtimes (Ollama, LM Studio, vLLM via REST).
 * **Online Subtitle Downloader (`Ctrl+Alt+S`):** Integrated OpenSubtitles search with automatic media hash verification and keyword queries.
 * **Broad Subtitle Format Support:** Native parsing and rendering of ASS/SSA (with full typography and vector shapes), SRT, VTT, SMI, SUP (Blu-ray PGS), IDX/SUB, and synchronized LRC lyrics.
@@ -75,6 +76,7 @@ Jonaki implements the established control paradigms and workflow patterns of Pot
 * **Playlist Window (`F8` / `F12`):** Multi-album tabbed playlist manager with drag-and-drop file ingestion, automatic directory scanning, smart alphanumeric sorting, and search.
 * **Quick Control Box (`F6`):** Tabbed floating adjustment dialog consolidating Audio Equalizer, Video ProcAmp, Subtitle configuration, and Playback speed controls.
 * **Smart Persistence:** SQLite backend (`mediadb.sqlite`) that automatically remembers resume positions, track selections, and bookmarks (`P`, `H`, `J`) across restarts.
+* **Display & Power Management Keep-Alive:** Dedicated desktop D-Bus inhibitor integrating `org.kde.Solid.PowerManagement.PolicyAgent` (KDE Plasma), `org.freedesktop.ScreenSaver`, and `org.freedesktop.PowerManagement` with periodic activity heartbeats to prevent screen dimming, screensaver activation, or system suspend during playback.
 * **Seamless A-B Repeat Loop (`Ctrl+[` / `Ctrl+]` / `Ctrl+\`):** High-precision video segment looping.
 * **System Integration:** MPRIS2 D-Bus service (`org.mpris.MediaPlayer2.jonaki`) for system media keys and desktop environments, combined with single-instance IPC coordination (`/current`, `/new`).
 
@@ -352,6 +354,7 @@ yt-dlp -o - -f best "https://www.youtube.com/watch?v=..." | jonaki -
 | `S` | Cycle Primary Subtitle Track |
 | `Shift+S` | Cycle Secondary Subtitle Track (Dual Subtitles) |
 | `Alt+O` | Open / Load Subtitle File |
+| `Alt+E` | Open Subtitle Style Settings Dialog (Typography, Colors, Borders, Shadows) |
 | `Alt+H` | Toggle Subtitle Visibility (Show / Hide) |
 | `[` / `]` | Subtitle Sync adjust (-0.5s / +0.5s) |
 | `\` | Reset Subtitle Sync (0.0s) |
@@ -426,23 +429,23 @@ python3 -m unittest discover tests
 ```
 .
 ├── bin/
-│   ├── jonaki              # Primary shell launcher
-│   └── potplayer           # Compatibility wrapper
+│   └── jonaki              # Primary shell launcher
 ├── src/
 │   ├── jonaki.py           # Application entry point & CLI switch parser
-│   ├── potplayer.py        # Backward-compatibility import wrapper
 │   ├── core/
 │   │   ├── engine.py       # In-process libmpv C-FFI controller
 │   │   ├── ipc.py          # Unix domain socket single-instance protocol
 │   │   ├── media_db.py     # SQLite persistence for resume points & bookmarks
-│   │   └── mpris.py        # D-Bus MPRIS2 MediaPlayer2 interface
+│   │   ├── mpris.py        # D-Bus MPRIS2 MediaPlayer2 interface
+│   │   └── power_manager.py# D-Bus sleep & screen dimming inhibitor
 │   ├── ui/
 │   │   ├── main_window.py  # Top-level GTK player window & event coordinator
 │   │   ├── skin_engine.py  # DSF skin unpacker & Cairo sprite sheet compositor
 │   │   ├── context_menu.py # Right-click context menu tree
 │   │   ├── control_box.py  # F6 multi-tab adjustment window
 │   │   ├── playlist_view.py# F8 / F12 playlist view
-│   │   └── osd_overlay.py  # Technical HUD & notification overlay
+│   │   ├── osd_overlay.py  # Technical HUD & notification overlay
+│   │   └── subtitle_style_dialog.py # PotPlayer-style subtitle visual styling editor
 │   ├── audio/
 │   │   ├── equalizer.py    # 10-band graphic equalizer profile models
 │   │   └── dsp_chain.py    # Gain staging, AVC normalizer, and limiter
@@ -450,7 +453,7 @@ python3 -m unittest discover tests
 │   │   ├── capture.py      # Frame capture, storyboard generator, GIF maker
 │   │   └── shader_manager.py # GLSL user shader injection pipeline
 │   └── subtitle/
-│       ├── subtitle_manager.py # Multi-stream subtitle tracking & sync
+│       ├── subtitle_manager.py # Multi-stream subtitle tracking & styling persistence
 │       ├── translator.py   # Translation service client (LLM, DeepL, Google)
 │       └── online_search.py# OpenSubtitles hash calculation & retrieval
 ├── assets/                 # Default skins, logos, and shader hooks
